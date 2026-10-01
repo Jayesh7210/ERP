@@ -16,8 +16,8 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _identifierController = TextEditingController(text: 'admin@erp.com');
-  final TextEditingController _passwordController = TextEditingController(text: 'admin123');
+  final TextEditingController _identifierController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
   String _errorMessage = '';
@@ -329,68 +329,6 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void _showServerConfigDialog() {
-    final urlCtrl = TextEditingController(text: AppState.apiBaseUrl);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.dns_outlined, color: AppColors.primary),
-            SizedBox(width: 8),
-            Text('Server Configuration', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Specify your backend API endpoint. For physical devices on Wi-Fi, use your PC LAN IP (e.g. http://192.168.0.x:5000/api).',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: urlCtrl,
-              decoration: InputDecoration(
-                labelText: 'Backend API URL',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                prefixIcon: const Icon(Icons.link),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              urlCtrl.text = 'http://localhost:5000/api';
-            },
-            child: const Text('Reset Default'),
-          ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-            onPressed: () async {
-              final newUrl = urlCtrl.text.trim();
-              if (newUrl.isNotEmpty) {
-                setState(() => AppState.apiBaseUrl = newUrl);
-                await SessionService.saveApiBaseUrl(newUrl);
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Server endpoint saved: $newUrl'), backgroundColor: Colors.green),
-                  );
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -403,13 +341,6 @@ class _LoginPageState extends State<LoginPage> {
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings_outlined, color: AppColors.textSecondary),
-              tooltip: 'Configure Server URL',
-              onPressed: _showServerConfigDialog,
-            ),
-          ],
         ),
         body: Center(
           child: SingleChildScrollView(

@@ -8,11 +8,8 @@ import 'features/shell/dashboard_shell.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Restore saved API server URL if present
-  final savedUrl = await SessionService.getApiBaseUrl();
-  if (savedUrl != null && savedUrl.isNotEmpty) {
-    AppState.apiBaseUrl = savedUrl;
-  }
+  // API endpoint is permanently hardcoded to production Railway server
+  // (AppState.apiBaseUrl = 'https://erp-production-5697.up.railway.app/api')
 
   // Restore persistent user session if present
   final cachedUser = await SessionService.getUser();
