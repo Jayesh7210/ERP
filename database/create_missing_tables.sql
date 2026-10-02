@@ -15,11 +15,22 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 2. ALTER EXISTING TABLES WITH MISSING COLUMNS
 -- ============================================================================
 
--- A. Users Table: Add phone, referral hierarchy, duty status, password hash
+-- A. Users Table: Add password, phone, KYC/Aadhaar, referral hierarchy, duty status
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT DEFAULT 'sales123';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS aadhaar_number VARCHAR(100) DEFAULT 'Not Provided';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS aadhaar_doc TEXT DEFAULT 'Aadhaar_Document.pdf';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status VARCHAR(50) DEFAULT 'Verified';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS requires_password_setup BOOLEAN DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_on_duty BOOLEAN DEFAULT TRUE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- Set default passwords by role
+UPDATE users SET password = 'admin123' WHERE role = 'super_admin' AND (password IS NULL OR password = 'sales123');
+UPDATE users SET password = 'store123' WHERE role = 'store_admin' AND password IS NULL;
+UPDATE users SET password = 'fsm123' WHERE role = 'field_sales_manager' AND password IS NULL;
+UPDATE users SET password = 'sales123' WHERE role = 'salesman' AND password IS NULL;
 
 -- B. Products Table: Add pricing, category, alerts, images
 ALTER TABLE products ADD COLUMN IF NOT EXISTS base_price DECIMAL(12, 2) DEFAULT 0.00;

@@ -17,9 +17,16 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     phone VARCHAR(50),
+    password TEXT DEFAULT 'sales123',
+    aadhaar_number VARCHAR(100) DEFAULT 'Not Provided',
+    aadhaar_doc TEXT DEFAULT 'Aadhaar_Document.pdf',
+    kyc_status VARCHAR(50) DEFAULT 'Verified',
+    requires_password_setup BOOLEAN DEFAULT FALSE,
     role user_role NOT NULL,
     warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL,
     parent_id UUID REFERENCES users(id) ON DELETE SET NULL, -- Reports to
+    referrer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    is_on_duty BOOLEAN DEFAULT TRUE,
     status approval_status DEFAULT 'approved', -- Direct additions by Super Admin default to approved
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -236,10 +243,10 @@ CREATE TABLE IF NOT EXISTS settlements (
 -- INITIAL SEED (Zero dummy data, ONLY single Super Admin account & default rules)
 -- ============================================================================
 
--- 1. Single Super Admin account (Passwordless / Email auth: admin@erp.com)
-INSERT INTO users (id, name, email, phone, role, status)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Super Admin', 'admin@erp.com', '', 'super_admin', 'approved')
-ON CONFLICT (email) DO NOTHING;
+-- 1. Single Super Admin account (admin@erp.com / admin123)
+INSERT INTO users (id, name, email, phone, role, password, status)
+VALUES ('00000000-0000-0000-0000-000000000001', 'Super Admin', 'admin@erp.com', '+91 99999 00001', 'super_admin', 'admin123', 'approved')
+ON CONFLICT (email) DO UPDATE SET password = 'admin123', phone = '+91 99999 00001';
 
 -- 2. Default Dynamic Roles & Permissions
 INSERT INTO roles_permissions (role, permission_key, is_allowed) VALUES

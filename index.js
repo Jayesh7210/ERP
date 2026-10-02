@@ -55,18 +55,18 @@ const mockDb = {
     { id: 'w2', name: 'Secondary Hub', location: 'Pune' }
   ],
   users: [
-    { id: '804969de-a546-4e60-8137-c4d914563536', name: 'Super Admin', email: 'admin@erp.com', phone: '', role: 'super_admin', status: 'approved', warehouse_id: null, parent_id: null, is_on_duty: true },
-    { id: 'u1', name: 'Super Admin', email: 'admin@erp.com', phone: '', role: 'super_admin', status: 'approved', warehouse_id: null, parent_id: null, is_on_duty: true },
-    { id: 'b2345678-cd12-34ef-56df-7890abcdef12', name: 'Store Admin One', email: 'store@erp.com', phone: '+91 98765 10001', role: 'store_admin', status: 'approved', warehouse_id: 'w1', parent_id: null, is_on_duty: true },
-    { id: 'c3456789-de23-45ff-67ff-8901abcdef23', name: 'FSM Alpha', email: 'fsm@erp.com', phone: '+91 98765 10002', role: 'field_sales_manager', status: 'approved', warehouse_id: 'w1', parent_id: 'b2345678-cd12-34ef-56df-7890abcdef12', is_on_duty: true },
+    { id: '804969de-a546-4e60-8137-c4d914563536', name: 'Super Admin', email: 'admin@erp.com', phone: '+91 99999 00001', role: 'super_admin', status: 'approved', warehouse_id: null, parent_id: null, is_on_duty: true, password: 'admin123', aadhaar_number: '5489 1234 8901', aadhaar_doc: 'Aadhaar_SuperAdmin.pdf', kyc_status: 'Verified', requires_password_setup: false },
+    { id: 'u1', name: 'Super Admin', email: 'admin@erp.com', phone: '+91 99999 00001', role: 'super_admin', status: 'approved', warehouse_id: null, parent_id: null, is_on_duty: true, password: 'admin123', aadhaar_number: '5489 1234 8901', aadhaar_doc: 'Aadhaar_SuperAdmin.pdf', kyc_status: 'Verified', requires_password_setup: false },
+    { id: 'b2345678-cd12-34ef-56df-7890abcdef12', name: 'Store Admin One', email: 'store@erp.com', phone: '+91 98765 10001', role: 'store_admin', status: 'approved', warehouse_id: 'w1', parent_id: null, is_on_duty: true, password: 'store123', aadhaar_number: '6321 9845 1024', aadhaar_doc: 'Aadhaar_StoreAdmin_One.pdf', kyc_status: 'Verified', requires_password_setup: false },
+    { id: 'c3456789-de23-45ff-67ff-8901abcdef23', name: 'FSM Alpha', email: 'fsm@erp.com', phone: '+91 98765 10002', role: 'field_sales_manager', status: 'approved', warehouse_id: 'w1', parent_id: 'b2345678-cd12-34ef-56df-7890abcdef12', is_on_duty: true, password: 'fsm123', aadhaar_number: '7823 4512 9031', aadhaar_doc: 'Aadhaar_FSM_Alpha.pdf', kyc_status: 'Verified', requires_password_setup: false },
     // Salesman A (First salesman)
-    { id: 'd4567890-ef34-56ff-78ff-9012abcdef34', name: 'Salesman John (A)', email: 'sales@erp.com', phone: '+91 98765 20001', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: null, is_on_duty: true },
+    { id: 'd4567890-ef34-56ff-78ff-9012abcdef34', name: 'Salesman John (A)', email: 'sales@erp.com', phone: '+91 98765 20001', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: null, is_on_duty: true, password: 'sales123', aadhaar_number: '8921 7845 2314', aadhaar_doc: 'Aadhaar_Salesman_John.pdf', kyc_status: 'Verified', requires_password_setup: false },
     // Salesman B (Referred by A)
-    { id: 'b0000000-0000-0000-0000-000000000002', name: 'Salesman Bharat (B)', email: 'sales_b@erp.com', phone: '+91 98765 20002', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'd4567890-ef34-56ff-78ff-9012abcdef34', is_on_duty: true },
+    { id: 'b0000000-0000-0000-0000-000000000002', name: 'Salesman Bharat (B)', email: 'sales_b@erp.com', phone: '+91 98765 20002', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'd4567890-ef34-56ff-78ff-9012abcdef34', is_on_duty: true, password: 'sales123', aadhaar_number: '9012 3456 7812', aadhaar_doc: 'Aadhaar_Bharat.pdf', kyc_status: 'Verified', requires_password_setup: false },
     // Salesman C (Referred by B)
-    { id: 'c0000000-0000-0000-0000-000000000003', name: 'Salesman Chirag (C)', email: 'sales_c@erp.com', phone: '+91 98765 20003', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'b0000000-0000-0000-0000-000000000002', is_on_duty: true },
+    { id: 'c0000000-0000-0000-0000-000000000003', name: 'Salesman Chirag (C)', email: 'sales_c@erp.com', phone: '+91 98765 20003', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'b0000000-0000-0000-0000-000000000002', is_on_duty: true, password: 'sales123', aadhaar_number: '3456 7890 1234', aadhaar_doc: 'Aadhaar_Chirag.pdf', kyc_status: 'Verified', requires_password_setup: false },
     // Salesman D (Referred by A)
-    { id: 'd0000000-0000-0000-0000-000000000004', name: 'Salesman Deepak (D)', email: 'sales_d@erp.com', phone: '+91 98765 20004', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'd4567890-ef34-56ff-78ff-9012abcdef34', is_on_duty: true }
+    { id: 'd0000000-0000-0000-0000-000000000004', name: 'Salesman Deepak (D)', email: 'sales_d@erp.com', phone: '+91 98765 20004', role: 'salesman', status: 'approved', warehouse_id: 'w1', parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23', referrer_id: 'd4567890-ef34-56ff-78ff-9012abcdef34', is_on_duty: true, password: 'sales123', aadhaar_number: '7890 1234 5678', aadhaar_doc: 'Aadhaar_Deepak.pdf', kyc_status: 'Verified', requires_password_setup: false }
   ],
   roles_permissions: [
     { role: 'store_admin', permission_key: 'add_stock', is_allowed: true },
@@ -344,104 +344,51 @@ async function logAudit(userId, userName, action, entityName, entityId, details)
 
 // --- AUTH & USER MANAGEMENT (Traditional Email/Mobile + Password Auth with Super Admin Password & Aadhaar Visibility) ---
 
-const CREDENTIALS_FILE = path.join(__dirname, 'user_credentials.json');
-
-function loadCredentials() {
-  try {
-    if (fs.existsSync(CREDENTIALS_FILE)) {
-      return JSON.parse(fs.readFileSync(CREDENTIALS_FILE, 'utf8'));
-    }
-  } catch (e) {
-    console.error('Failed to load credentials:', e.message);
-  }
-  return {};
-}
-
-function saveCredentials(creds) {
-  try {
-    fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Failed to save credentials:', e.message);
+function getDefaultPasswordForRole(role) {
+  switch (role) {
+    case 'super_admin': return 'admin123';
+    case 'store_admin': return 'store123';
+    case 'field_sales_manager': return 'fsm123';
+    case 'salesman': return 'sales123';
+    default: return '123456';
   }
 }
 
-function getUserCredentials(email, phone) {
-  const creds = loadCredentials();
-  if (email) {
-    const direct = creds[email.trim().toLowerCase()];
-    if (direct) return direct;
-  }
-  const normalizedPhone = (phone || '').replace(/[^0-9]/g, '');
-  if (normalizedPhone.length >= 10) {
-    for (const [key, val] of Object.entries(creds)) {
-      const crDigits = (val.phone || '').replace(/[^0-9]/g, '');
-      if (crDigits.length >= 10 && (crDigits.endsWith(normalizedPhone) || normalizedPhone.endsWith(crDigits))) {
-        return val;
-      }
-    }
-  }
-  return null;
-}
-
-function findUserByIdentifier(loginId) {
+async function findUserByIdentifier(loginId) {
   if (!loginId) return null;
   const isEmail = loginId.includes('@');
   const digits = loginId.replace(/[^0-9]/g, '');
 
-  if (isEmail) {
-    let found = mockDb.users.find(u => u.email.toLowerCase() === loginId.toLowerCase() && u.status === 'approved');
-    if (found) return found;
-  } else {
-    // Check approved users by phone first
-    let found = mockDb.users.find(u => (u.phone || '').replace(/[^0-9]/g, '').endsWith(digits) && u.status === 'approved');
-    if (found) return found;
-  }
-
-  // Auto-restore approved user from credentials store if present
-  const allCreds = loadCredentials();
-  for (const [em, cr] of Object.entries(allCreds)) {
-    const matchesEmail = isEmail && em.toLowerCase() === loginId.toLowerCase();
-    const crDigits = (cr.phone || '').replace(/[^0-9]/g, '');
-    const matchesPhone = !isEmail && digits.length >= 10 && (crDigits.endsWith(digits) || digits.endsWith(crDigits));
-    if (matchesEmail || matchesPhone) {
-      let existing = mockDb.users.find(u => u.email.toLowerCase() === em.toLowerCase());
-      if (!existing) {
-        existing = {
-          id: `usr_${Buffer.from(em).toString('hex').slice(0, 12)}`,
-          name: cr.name || em.split('@')[0].replace(/[._0-9]/g, ' ').trim().replace(/\b\w/g, l => l.toUpperCase()),
-          email: em,
-          phone: cr.phone || '',
-          role: 'salesman',
-          warehouse_id: 'w1',
-          parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23',
-          status: 'approved',
-          is_on_duty: true
-        };
-        mockDb.users.push(existing);
+  if (isSupabaseConfigured) {
+    try {
+      if (isEmail) {
+        const { data, error } = await supabase.from('users').select('*').ilike('email', loginId).eq('status', 'approved');
+        if (!error && data && data.length > 0) return data[0];
+      } else if (digits.length >= 10) {
+        const { data, error } = await supabase.from('users').select('*').eq('status', 'approved');
+        if (!error && data && data.length > 0) {
+          const found = data.find(u => {
+            const pDigits = (u.phone || '').replace(/[^0-9]/g, '');
+            return pDigits.length >= 10 && (pDigits.endsWith(digits) || digits.endsWith(pDigits));
+          });
+          if (found) return found;
+        }
       }
-      return existing;
+    } catch (err) {
+      console.warn('findUserByIdentifier Supabase error:', err.message);
     }
   }
-  return null;
-}
 
-function setWorkerCredentials(email, phone, password, aadhaar_number, aadhaar_doc, requires_password_setup) {
-  const creds = loadCredentials();
-  const key = (email || '').trim().toLowerCase();
-  const existing = creds[key] || {};
-  creds[key] = {
-    phone: phone || existing.phone || '',
-    password: password || existing.password || 'sales123',
-    aadhaar_number: aadhaar_number || existing.aadhaar_number || 'Not Provided',
-    aadhaar_doc: aadhaar_doc || existing.aadhaar_doc || 'Aadhaar_Document.pdf',
-    kyc_status: 'Verified',
-    requires_password_setup: typeof requires_password_setup === 'boolean'
-      ? requires_password_setup
-      : (existing.requires_password_setup ?? false),
-    updated_at: new Date().toISOString()
-  };
-  saveCredentials(creds);
-  return creds[key];
+  // Fallback to in-memory mockDb
+  if (isEmail) {
+    return mockDb.users.find(u => u.email.toLowerCase() === loginId.toLowerCase() && u.status === 'approved') || null;
+  } else if (digits.length >= 10) {
+    return mockDb.users.find(u => {
+      const pDigits = (u.phone || '').replace(/[^0-9]/g, '');
+      return pDigits.length >= 10 && (pDigits.endsWith(digits) || digits.endsWith(pDigits)) && u.status === 'approved';
+    }) || null;
+  }
+  return null;
 }
 
 // Check worker status (For first-time account activation)
@@ -454,16 +401,30 @@ app.post('/api/auth/check-status', async (req, res) => {
   const digits = loginId.replace(/[^0-9]/g, '');
 
   // 1. Check if user is approved and active
-  let matchedUser = findUserByIdentifier(loginId);
+  let matchedUser = await findUserByIdentifier(loginId);
 
   // 2. If not found in approved users, check if pending in requests queue
   if (!matchedUser) {
-    const pendingReq = (mockDb.userRequests || []).find(r => 
-      r.status === 'pending' && (
-        (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
-        (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
-      )
-    );
+    let pendingReq = null;
+    if (isSupabaseConfigured) {
+      try {
+        const { data } = await supabase.from('user_creation_requests').select('*').eq('status', 'pending');
+        if (data) {
+          pendingReq = data.find(r => 
+            (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
+            (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
+          );
+        }
+      } catch (_) {}
+    }
+    if (!pendingReq) {
+      pendingReq = (mockDb.userRequests || []).find(r => 
+        r.status === 'pending' && (
+          (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
+          (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
+        )
+      );
+    }
 
     if (pendingReq) {
       return res.json({
@@ -479,8 +440,7 @@ app.post('/api/auth/check-status', async (req, res) => {
     });
   }
 
-  const creds = getUserCredentials(matchedUser.email, matchedUser.phone);
-  const needsSetup = creds?.requires_password_setup === true;
+  const needsSetup = matchedUser.requires_password_setup === true;
 
   return res.json({
     status: needsSetup ? 'ready_for_setup' : 'already_setup',
@@ -489,7 +449,7 @@ app.post('/api/auth/check-status', async (req, res) => {
       id: matchedUser.id,
       name: matchedUser.name,
       email: matchedUser.email,
-      phone: creds?.phone || matchedUser.phone || '',
+      phone: matchedUser.phone || '',
       role: matchedUser.role
     }
   });
@@ -506,22 +466,29 @@ app.post('/api/auth/setup-password', async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 4 characters long.' });
   }
 
-  const matchedUser = findUserByIdentifier(loginId);
+  const matchedUser = await findUserByIdentifier(loginId);
   if (!matchedUser) {
     return res.status(404).json({ error: 'No approved staff account found for this mobile number or email.' });
   }
 
-  const creds = getUserCredentials(matchedUser.email, matchedUser.phone);
+  // Update password directly in database
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('users').update({
+        password: newPass,
+        requires_password_setup: false
+      }).eq('id', matchedUser.id);
+    } catch (err) {
+      console.warn('Supabase setup-password update error:', err.message);
+    }
+  }
 
-  // Update password and clear requires_password_setup
-  const updatedCred = setWorkerCredentials(
-    matchedUser.email,
-    creds?.phone || matchedUser.phone,
-    newPass,
-    creds?.aadhaar_number || 'Not Provided',
-    creds?.aadhaar_doc || 'Aadhaar_Document.pdf',
-    false // Password is now permanently set by worker!
-  );
+  // Update in-memory fallback
+  const memUser = mockDb.users.find(u => u.id === matchedUser.id || u.email.toLowerCase() === matchedUser.email.toLowerCase());
+  if (memUser) {
+    memUser.password = newPass;
+    memUser.requires_password_setup = false;
+  }
 
   await logAudit(
     matchedUser.id,
@@ -534,12 +501,8 @@ app.post('/api/auth/setup-password', async (req, res) => {
 
   const enrichedUser = {
     ...matchedUser,
-    phone: updatedCred.phone,
     password: newPass,
-    requires_password_setup: false,
-    aadhaar_number: updatedCred.aadhaar_number,
-    aadhaar_doc: updatedCred.aadhaar_doc,
-    kyc_status: updatedCred.kyc_status
+    requires_password_setup: false
   };
 
   const token = `jwt_${Buffer.from(matchedUser.email).toString('base64')}_${Date.now()}`;
@@ -563,46 +526,30 @@ app.post('/api/auth/login', async (req, res) => {
   const isEmail = loginId.includes('@');
   const digits = loginId.replace(/[^0-9]/g, '');
 
-  let matchedUser = null;
-
-  if (isSupabaseConfigured) {
-    try {
-      if (isEmail) {
-        const { data, error } = await supabase.from('users').select('*').ilike('email', loginId).eq('status', 'approved');
-        if (!error && data && data.length > 0) matchedUser = data[0];
-      } else {
-        const allCreds = loadCredentials();
-        let matchedEmail = null;
-        for (const [em, cr] of Object.entries(allCreds)) {
-          const crDigits = (cr.phone || '').replace(/[^0-9]/g, '');
-          if (digits.length >= 10 && (crDigits.endsWith(digits) || digits.endsWith(crDigits))) {
-            matchedEmail = em;
-            break;
-          }
-        }
-        if (matchedEmail) {
-          const { data, error } = await supabase.from('users').select('*').ilike('email', matchedEmail).eq('status', 'approved');
-          if (!error && data && data.length > 0) matchedUser = data[0];
-        }
-      }
-    } catch (err) {
-      console.warn('Supabase login query error:', err.message);
-    }
-  }
-
-  // Fallback to mockDb / local store
-  if (!matchedUser) {
-    matchedUser = findUserByIdentifier(loginId);
-  }
+  let matchedUser = await findUserByIdentifier(loginId);
 
   if (!matchedUser) {
     // Check if account is still waiting for approval
-    const pendingReq = (mockDb.userRequests || []).find(r => 
-      r.status === 'pending' && (
-        (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
-        (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
-      )
-    );
+    let pendingReq = null;
+    if (isSupabaseConfigured) {
+      try {
+        const { data } = await supabase.from('user_creation_requests').select('*').eq('status', 'pending');
+        if (data) {
+          pendingReq = data.find(r => 
+            (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
+            (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
+          );
+        }
+      } catch (_) {}
+    }
+    if (!pendingReq) {
+      pendingReq = (mockDb.userRequests || []).find(r => 
+        r.status === 'pending' && (
+          (isEmail && r.email?.toLowerCase() === loginId.toLowerCase()) ||
+          (!isEmail && digits.length >= 10 && (r.phone || '').replace(/[^0-9]/g, '').endsWith(digits))
+        )
+      );
+    }
     if (pendingReq) {
       return res.status(403).json({
         error: 'Your account registration is still pending Super Admin approval. Please contact Super Admin.'
@@ -611,9 +558,8 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(401).json({ error: 'No active account found with this email or mobile number.' });
   }
 
-  // Check if this account needs first-time password setup!
-  const creds = getUserCredentials(matchedUser.email, matchedUser.phone);
-  if (creds?.requires_password_setup === true) {
+  // Check if this account needs first-time password setup
+  if (matchedUser.requires_password_setup === true) {
     return res.json({
       requires_password_setup: true,
       message: 'First-time login detected. Please create your secure password to activate your account.',
@@ -621,7 +567,7 @@ app.post('/api/auth/login', async (req, res) => {
         id: matchedUser.id,
         name: matchedUser.name,
         email: matchedUser.email,
-        phone: creds?.phone || matchedUser.phone || '',
+        phone: matchedUser.phone || '',
         role: matchedUser.role,
         requires_password_setup: true
       }
@@ -632,18 +578,8 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Please enter your password.' });
   }
 
-  // Verify Password
-  let expectedPassword = creds?.password;
-  if (!expectedPassword) {
-    switch (matchedUser.role) {
-      case 'super_admin': expectedPassword = 'admin123'; break;
-      case 'store_admin': expectedPassword = 'store123'; break;
-      case 'field_sales_manager': expectedPassword = 'fsm123'; break;
-      case 'salesman': expectedPassword = 'sales123'; break;
-      default: expectedPassword = '123456';
-    }
-    setWorkerCredentials(matchedUser.email, matchedUser.phone, expectedPassword, 'Not Provided', 'Aadhaar_Document.pdf', false);
-  }
+  // Password from database or fallback default
+  const expectedPassword = matchedUser.password || getDefaultPasswordForRole(matchedUser.role);
 
   if (pass !== expectedPassword) {
     return res.status(401).json({
@@ -651,15 +587,14 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
-  // Enrich user with full phone, Aadhaar, and password metadata
   const enrichedUser = {
     ...matchedUser,
-    phone: creds?.phone || matchedUser.phone || '',
+    phone: matchedUser.phone || '',
     password: expectedPassword,
     requires_password_setup: false,
-    aadhaar_number: creds?.aadhaar_number || 'Not Provided',
-    aadhaar_doc: creds?.aadhaar_doc || 'Aadhaar_Document.pdf',
-    kyc_status: creds?.kyc_status || 'Verified'
+    aadhaar_number: matchedUser.aadhaar_number || 'Not Provided',
+    aadhaar_doc: matchedUser.aadhaar_doc || 'Aadhaar_Document.pdf',
+    kyc_status: matchedUser.kyc_status || 'Verified'
   };
 
   const token = `jwt_${Buffer.from(matchedUser.email).toString('base64')}_${Date.now()}`;
@@ -676,9 +611,6 @@ app.post('/api/workforce/request', async (req, res) => {
   const initialPassword = password || 'sales123';
   const aadhNumber = aadhaar_number || 'Not Provided';
   const aadhDoc = kyc_doc || 'Aadhaar_Document.pdf';
-
-  // Store credentials draft
-  setWorkerCredentials(email, phone, initialPassword, aadhNumber, aadhDoc);
 
   if (isSupabaseConfigured) {
     try {
@@ -704,7 +636,6 @@ app.post('/api/workforce/request', async (req, res) => {
 
 // View pending workforce requests (Super Admin)
 app.get('/api/workforce/requests', async (req, res) => {
-  const allCreds = loadCredentials();
   if (isSupabaseConfigured) {
     try {
       let requests = [];
@@ -722,16 +653,13 @@ app.get('/api/workforce/requests', async (req, res) => {
         }
       }
 
-      const enriched = requests.map(r => {
-        const cr = allCreds[(r.email || '').toLowerCase()] || {};
-        return {
-          ...r,
-          phone: cr.phone || r.phone || '',
-          password: cr.password || 'sales123',
-          aadhaar_number: cr.aadhaar_number || 'Not Provided',
-          kyc_doc: cr.aadhaar_doc || 'Aadhaar_Document.pdf'
-        };
-      });
+      const enriched = requests.map(r => ({
+        ...r,
+        phone: r.phone || '',
+        password: r.password || 'sales123',
+        aadhaar_number: r.aadhaar_number || 'Not Provided',
+        kyc_doc: r.kyc_doc || 'Aadhaar_Document.pdf'
+      }));
       return res.json(enriched);
     } catch (err) {
       console.warn('user_creation_requests query exception:', err.message);
@@ -750,8 +678,6 @@ app.post('/api/workforce/approve', async (req, res) => {
   if (!request_id) return res.status(400).json({ error: 'Request ID is required' });
 
   const status = approve ? 'approved' : 'rejected';
-  const allCreds = loadCredentials();
-
   let approvedSuccessfully = false;
 
   if (isSupabaseConfigured) {
@@ -763,25 +689,32 @@ app.post('/api/workforce/approve', async (req, res) => {
         .single();
       if (!reqErr && requestData) {
         if (approve) {
-          await supabase.from('users').insert([{
+          const userPayload = {
             name: requestData.name,
             email: requestData.email,
             role: requestData.role,
             warehouse_id: requestData.warehouse_id,
             parent_id: requestData.parent_id,
-            status: 'approved'
-          }]);
+            status: 'approved',
+            requires_password_setup: true
+          };
+          if (requestData.phone) userPayload.phone = requestData.phone;
+          if (requestData.password) userPayload.password = requestData.password;
+          if (requestData.aadhaar_number) userPayload.aadhaar_number = requestData.aadhaar_number;
+          if (requestData.kyc_doc) userPayload.aadhaar_doc = requestData.kyc_doc;
 
-          const existingCr = allCreds[(requestData.email || '').toLowerCase()];
-          const needsSetup = existingCr?.requires_password_setup !== false;
-          setWorkerCredentials(
-            requestData.email,
-            existingCr?.phone || '',
-            existingCr?.password || 'Pending Worker Setup',
-            existingCr?.aadhaar_number || 'Not Provided',
-            existingCr?.aadhaar_doc || 'Aadhaar_Document.pdf',
-            needsSetup
-          );
+          try {
+            await supabase.from('users').insert([userPayload]);
+          } catch (_) {
+            await supabase.from('users').insert([{
+              name: requestData.name,
+              email: requestData.email,
+              role: requestData.role,
+              warehouse_id: requestData.warehouse_id,
+              parent_id: requestData.parent_id,
+              status: 'approved'
+            }]);
+          }
         }
         approvedSuccessfully = true;
       }
@@ -804,18 +737,13 @@ app.post('/api/workforce/approve', async (req, res) => {
         role: r.role,
         warehouse_id: r.warehouse_id,
         parent_id: r.parent_id,
-        status: 'approved'
+        status: 'approved',
+        password: r.password || 'sales123',
+        aadhaar_number: r.aadhaar_number || 'Not Provided',
+        aadhaar_doc: r.kyc_doc || 'Aadhaar_Document.pdf',
+        requires_password_setup: r.requires_password_setup !== false
       };
       mockDb.users.push(newUser);
-      const needsSetup = r.requires_password_setup !== false;
-      setWorkerCredentials(
-        r.email,
-        r.phone,
-        r.password || 'Pending Worker Setup',
-        r.aadhaar_number || 'Not Provided',
-        r.kyc_doc || 'Aadhaar_Document.pdf',
-        needsSetup
-      );
       const ref = (mockDb.salesmanReferrals || []).find(sr => sr.phone === r.phone || sr.referred_salesman_id === r.id);
       if (ref) {
         ref.status = 'Active';
@@ -833,29 +761,19 @@ app.post('/api/workforce/approve', async (req, res) => {
   }
 });
 
-// List all workforce users (Enriched with Passwords, Phone, and Aadhaar info for Super Admin)
+// List all workforce users (Directly from database with Passwords, Phone, and Aadhaar info for Super Admin)
 app.get('/api/users', async (req, res) => {
   const { role, status, search } = req.query;
-  const allCreds = loadCredentials();
 
-  const enrichUser = (u) => {
-    const cred = allCreds[(u.email || '').toLowerCase()] || {};
-    let defaultPass = '123456';
-    if (u.role === 'super_admin') defaultPass = 'admin123';
-    else if (u.role === 'store_admin') defaultPass = 'store123';
-    else if (u.role === 'field_sales_manager') defaultPass = 'fsm123';
-    else if (u.role === 'salesman') defaultPass = 'sales123';
-
-    return {
-      ...u,
-      phone: cred.phone || u.phone || '',
-      password: cred.password || defaultPass,
-      requires_password_setup: cred.requires_password_setup === true,
-      aadhaar_number: cred.aadhaar_number || 'Not Provided',
-      aadhaar_doc: cred.aadhaar_doc || 'Aadhaar_Document.pdf',
-      kyc_status: cred.kyc_status || 'Verified'
-    };
-  };
+  const enrichUser = (u) => ({
+    ...u,
+    phone: u.phone || '',
+    password: u.password || getDefaultPasswordForRole(u.role),
+    requires_password_setup: u.requires_password_setup === true,
+    aadhaar_number: u.aadhaar_number || 'Not Provided',
+    aadhaar_doc: u.aadhaar_doc || 'Aadhaar_Document.pdf',
+    kyc_status: u.kyc_status || 'Verified'
+  });
 
   if (isSupabaseConfigured) {
     try {
@@ -872,23 +790,6 @@ app.get('/api/users', async (req, res) => {
       return res.status(500).json({ error: err.message });
     }
   } else {
-    // Auto-sync any registered/approved users from credentials store
-    for (const [em, cr] of Object.entries(allCreds)) {
-      if (!mockDb.users.some(u => u.email.toLowerCase() === em.toLowerCase())) {
-        mockDb.users.push({
-          id: `usr_${Buffer.from(em).toString('hex').slice(0, 12)}`,
-          name: cr.name || em.split('@')[0].replace(/[._0-9]/g, ' ').trim().replace(/\b\w/g, l => l.toUpperCase()),
-          email: em,
-          phone: cr.phone || '',
-          role: 'salesman',
-          warehouse_id: 'w1',
-          parent_id: 'c3456789-de23-45ff-67ff-8901abcdef23',
-          status: 'approved',
-          is_on_duty: true
-        });
-      }
-    }
-
     let result = [...mockDb.users];
     if (role && role !== 'all') result = result.filter(u => u.role === role);
     if (status && status !== 'all') result = result.filter(u => u.status === status);
@@ -916,7 +817,7 @@ app.get('/api/workforce', async (req, res) => {
   return res.redirect(307, '/api/users');
 });
 
-// Create user directly (Super Admin - with Password & Aadhaar card)
+// Create user directly (Super Admin - saves Password & Aadhaar card in database)
 app.post('/api/users', async (req, res) => {
   const { name, email, phone, role, warehouse_id, parent_id, password, aadhaar_number, aadhaar_doc, admin_id, admin_name } = req.body;
   if (!name || !email || !role) {
@@ -927,25 +828,44 @@ app.post('/api/users', async (req, res) => {
   const aadhNumber = (aadhaar_number || '').trim() || 'Not Provided';
   const aadhDoc = (aadhaar_doc || '').trim() || 'Aadhaar_Document.pdf';
 
-  setWorkerCredentials(email, phone, assignedPassword, aadhNumber, aadhDoc);
-
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase.from('users').insert([{
-        name, email, role, warehouse_id: warehouse_id || null, parent_id: parent_id || null, status: 'approved'
-      }]).select().single();
-      if (error) throw error;
+      const userPayload = {
+        name,
+        email,
+        role,
+        warehouse_id: warehouse_id || null,
+        parent_id: parent_id || null,
+        status: 'approved'
+      };
+      if (phone) userPayload.phone = phone;
+      if (assignedPassword) userPayload.password = assignedPassword;
+      if (aadhNumber) userPayload.aadhaar_number = aadhNumber;
+      if (aadhDoc) userPayload.aadhaar_doc = aadhDoc;
+
+      let insertedData = null;
+      try {
+        const { data, error } = await supabase.from('users').insert([userPayload]).select().single();
+        if (error) throw error;
+        insertedData = data;
+      } catch (_) {
+        const { data, error: fbErr } = await supabase.from('users').insert([{
+          name, email, role, warehouse_id: warehouse_id || null, parent_id: parent_id || null, status: 'approved'
+        }]).select().single();
+        if (fbErr) throw fbErr;
+        insertedData = data;
+      }
 
       if (role === 'customer' || role === 'distributor') {
         const refCode = `${name.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 6)}${Math.floor(100 + Math.random() * 900)}`;
         await supabase.from('customers').insert([{
-          name, phone, email, customer_type: role === 'distributor' ? 'distributor' : 'retail', referral_code: refCode, created_by: data.id
+          name, phone, email, customer_type: role === 'distributor' ? 'distributor' : 'retail', referral_code: refCode, created_by: insertedData.id
         }]);
       }
 
-      await logAudit(admin_id, admin_name, 'CREATE_USER', 'users', data.id, `Created ${role} account for ${name} (${email})`);
+      await logAudit(admin_id, admin_name, 'CREATE_USER', 'users', insertedData.id, `Created ${role} account for ${name} (${email})`);
       return res.status(201).json({
-        ...data,
+        ...insertedData,
         phone: phone || '',
         password: assignedPassword,
         aadhaar_number: aadhNumber,
@@ -990,7 +910,7 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-// Super Admin reset or update password for any worker
+// Super Admin reset or update password for any worker (persisted directly in database)
 app.post('/api/users/:id/reset-password', async (req, res) => {
   const { id } = req.params;
   const { password, admin_id, admin_name } = req.body;
@@ -1000,64 +920,45 @@ app.post('/api/users/:id/reset-password', async (req, res) => {
 
   let user = null;
   if (isSupabaseConfigured) {
-    const { data } = await supabase.from('users').select('*').eq('id', id).single();
-    user = data;
+    try {
+      const { data, error } = await supabase.from('users')
+        .update({ password: password.trim() })
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) user = data;
+    } catch (_) {}
   }
   if (!user) {
     user = mockDb.users.find(u => u.id === id);
+    if (user) user.password = password.trim();
   }
   if (!user) {
     return res.status(404).json({ error: 'User not found.' });
   }
 
-  const allCreds = loadCredentials();
-  const key = (user.email || '').toLowerCase();
-  allCreds[key] = {
-    ...(allCreds[key] || {}),
-    password: password.trim(),
-    updated_at: new Date().toISOString()
-  };
-  saveCredentials(allCreds);
-
   await logAudit(admin_id, admin_name, 'RESET_PASSWORD', 'users', id, `Super Admin updated password for ${user.name} (${user.email})`);
   return res.json({ success: true, message: `Password for ${user.name} has been updated to "${password.trim()}".` });
 });
 
-// Update user details (Super Admin)
+// Update user details (Super Admin - persisted in database)
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { name, email, phone, role, warehouse_id, parent_id, status, password, aadhaar_number, aadhaar_doc, admin_id, admin_name } = req.body;
-
-  let existingUser = null;
-  if (isSupabaseConfigured) {
-    const { data } = await supabase.from('users').select('*').eq('id', id).single();
-    existingUser = data;
-  }
-  if (!existingUser) {
-    existingUser = mockDb.users.find(u => u.id === id);
-  }
-
-  const targetEmail = (email || existingUser?.email || '').toLowerCase();
-  if (targetEmail) {
-    const allCreds = loadCredentials();
-    const cr = allCreds[targetEmail] || {};
-    if (phone !== undefined) cr.phone = phone;
-    if (password !== undefined && password.trim().length > 0) cr.password = password.trim();
-    if (aadhaar_number !== undefined) cr.aadhaar_number = aadhaar_number;
-    if (aadhaar_doc !== undefined) cr.aadhaar_doc = aadhaar_doc;
-    allCreds[targetEmail] = cr;
-    saveCredentials(allCreds);
-  }
 
   if (isSupabaseConfigured) {
     try {
       const updateData = {};
       if (name !== undefined) updateData.name = name;
       if (email !== undefined) updateData.email = email;
+      if (phone !== undefined) updateData.phone = phone;
       if (role !== undefined) updateData.role = role;
       if (warehouse_id !== undefined) updateData.warehouse_id = warehouse_id;
       if (parent_id !== undefined) updateData.parent_id = parent_id;
       if (status !== undefined) updateData.status = status;
+      if (password !== undefined && password.trim().length > 0) updateData.password = password.trim();
+      if (aadhaar_number !== undefined) updateData.aadhaar_number = aadhaar_number;
+      if (aadhaar_doc !== undefined) updateData.aadhaar_doc = aadhaar_doc;
 
       const { data, error } = await supabase.from('users')
         .update(updateData)
@@ -1083,6 +984,9 @@ app.put('/api/users/:id', async (req, res) => {
     if (warehouse_id !== undefined) user.warehouse_id = warehouse_id;
     if (parent_id !== undefined) user.parent_id = parent_id;
     if (status !== undefined) user.status = status;
+    if (password !== undefined && password.trim().length > 0) user.password = password.trim();
+    if (aadhaar_number !== undefined) user.aadhaar_number = aadhaar_number;
+    if (aadhaar_doc !== undefined) user.aadhaar_doc = aadhaar_doc;
 
     await logAudit(admin_id, admin_name, 'UPDATE_USER', 'users', id, `Updated user ${user.name} details`);
     return res.json(user);
@@ -3634,15 +3538,6 @@ app.post('/api/salesman/referrals', async (req, res) => {
   };
   mockDb.userRequests.unshift(newReq);
 
-  // Store credentials draft with requires_password_setup: true
-  setWorkerCredentials(
-    generatedEmail,
-    phone,
-    'Pending Worker Setup',
-    'Pending Verification',
-    kyc_doc || 'Aadhaar_card.pdf',
-    true // requires_password_setup
-  );
 
   // 2. Track in salesman's referrals list
   const newReferral = {
