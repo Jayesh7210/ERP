@@ -170,7 +170,7 @@ const mockDb = {
       status: 'Active',
       earned: 10.00,
       bottles_sold: 10,
-      kyc_doc: 'Aadhaar_card.pdf',
+      kyc_doc: '',
       kyc_status: 'Verified',
       created_at: new Date(Date.now() - 86400000 * 2).toISOString()
     },
@@ -592,9 +592,9 @@ app.post('/api/auth/login', async (req, res) => {
     phone: matchedUser.phone || '',
     password: expectedPassword,
     requires_password_setup: false,
-    aadhaar_number: matchedUser.aadhaar_number || 'Not Provided',
-    aadhaar_doc: matchedUser.aadhaar_doc || 'Aadhaar_Document.pdf',
-    kyc_status: matchedUser.kyc_status || 'Verified'
+    aadhaar_number: matchedUser.aadhaar_number || '',
+    aadhaar_doc: matchedUser.aadhaar_doc || '',
+    kyc_status: matchedUser.kyc_status || (matchedUser.aadhaar_doc ? 'Verified' : 'Pending')
   };
 
   const token = `jwt_${Buffer.from(matchedUser.email).toString('base64')}_${Date.now()}`;
@@ -608,9 +608,9 @@ app.post('/api/workforce/request', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, role, and requested_by are required' });
   }
 
-  const initialPassword = password || 'sales123';
-  const aadhNumber = aadhaar_number || 'Not Provided';
-  const aadhDoc = kyc_doc || 'Aadhaar_Document.pdf';
+  const initialPassword = password || '';
+  const aadhNumber = (aadhaar_number || '').trim();
+  const aadhDoc = (kyc_doc || '').trim();
 
   if (isSupabaseConfigured) {
     try {
@@ -656,9 +656,9 @@ app.get('/api/workforce/requests', async (req, res) => {
       const enriched = requests.map(r => ({
         ...r,
         phone: r.phone || '',
-        password: r.password || 'sales123',
-        aadhaar_number: r.aadhaar_number || 'Not Provided',
-        kyc_doc: r.kyc_doc || 'Aadhaar_Document.pdf'
+        password: r.password || '',
+        aadhaar_number: r.aadhaar_number || '',
+        kyc_doc: r.kyc_doc || ''
       }));
       return res.json(enriched);
     } catch (err) {
@@ -738,9 +738,9 @@ app.post('/api/workforce/approve', async (req, res) => {
         warehouse_id: r.warehouse_id,
         parent_id: r.parent_id,
         status: 'approved',
-        password: r.password || 'sales123',
-        aadhaar_number: r.aadhaar_number || 'Not Provided',
-        aadhaar_doc: r.kyc_doc || 'Aadhaar_Document.pdf',
+        password: r.password || '',
+        aadhaar_number: r.aadhaar_number || '',
+        aadhaar_doc: r.kyc_doc || '',
         requires_password_setup: r.requires_password_setup !== false
       };
       mockDb.users.push(newUser);
@@ -768,11 +768,11 @@ app.get('/api/users', async (req, res) => {
   const enrichUser = (u) => ({
     ...u,
     phone: u.phone || '',
-    password: u.password || getDefaultPasswordForRole(u.role),
+    password: u.password || '',
     requires_password_setup: u.requires_password_setup === true,
-    aadhaar_number: u.aadhaar_number || 'Not Provided',
-    aadhaar_doc: u.aadhaar_doc || 'Aadhaar_Document.pdf',
-    kyc_status: u.kyc_status || 'Verified'
+    aadhaar_number: u.aadhaar_number || '',
+    aadhaar_doc: u.aadhaar_doc || '',
+    kyc_status: u.kyc_status || (u.aadhaar_doc ? 'Verified' : 'Pending')
   });
 
   if (isSupabaseConfigured) {
@@ -825,8 +825,8 @@ app.post('/api/users', async (req, res) => {
   }
 
   const assignedPassword = (password || '').trim() || (role === 'store_admin' ? 'store123' : role === 'field_sales_manager' ? 'fsm123' : 'sales123');
-  const aadhNumber = (aadhaar_number || '').trim() || 'Not Provided';
-  const aadhDoc = (aadhaar_doc || '').trim() || 'Aadhaar_Document.pdf';
+  const aadhNumber = (aadhaar_number || '').trim();
+  const aadhDoc = (aadhaar_doc || '').trim();
 
   if (isSupabaseConfigured) {
     try {
@@ -3532,8 +3532,8 @@ app.post('/api/salesman/referrals', async (req, res) => {
     requested_by: referrer_id || 'd4567890-ef34-56ff-78ff-9012abcdef34',
     status: 'pending',
     requires_password_setup: true,
-    aadhaar_number: 'Pending Verification',
-    kyc_doc: kyc_doc || 'Aadhaar_card.pdf',
+    aadhaar_number: '',
+    kyc_doc: kyc_doc || '',
     created_at: new Date().toISOString()
   };
   mockDb.userRequests.unshift(newReq);
@@ -3549,7 +3549,7 @@ app.post('/api/salesman/referrals', async (req, res) => {
     status: 'Pending Approval',
     earned: 0,
     bottles_sold: 0,
-    kyc_doc: kyc_doc || 'Aadhaar_card.pdf',
+    kyc_doc: kyc_doc || '',
     kyc_status: 'Pending Review',
     created_at: new Date().toISOString()
   };

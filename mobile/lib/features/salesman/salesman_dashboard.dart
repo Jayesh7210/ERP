@@ -119,6 +119,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   final TextEditingController _refNameCtrl = TextEditingController();
   final TextEditingController _refPhoneCtrl = TextEditingController();
   String _selectedKycFile = 'Tap to select file';
+  String? _selectedKycBase64;
+  Uint8List? _selectedKycBytes;
   bool _isSubmittingReferral = false;
   List<Map<String, dynamic>> _referralsList = [];
 
@@ -140,7 +142,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     _onlinePaymentCtrl = TextEditingController(text: '0');
     _soldBottlesInputCtrl = TextEditingController(text: '$_settlementSoldBottles');
     _damagedBottlesInputCtrl = TextEditingController(text: '$_damagedBottles');
-    _damageNotesCtrl = TextEditingController(text: 'Cap leakage / transit handling issue');
+    _damageNotesCtrl = TextEditingController();
     _loadAllData();
   }
 
@@ -309,7 +311,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           'referrer_id': _salesmanId,
           'full_name': _refNameCtrl.text.trim(),
           'phone': _refPhoneCtrl.text.trim(),
-          'kyc_doc': _selectedKycFile,
+          'kyc_doc': _selectedKycBase64 ?? _selectedKycFile,
         }),
       );
       if (res.statusCode == 201) {
@@ -319,6 +321,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           _refNameCtrl.clear();
           _refPhoneCtrl.clear();
           _selectedKycFile = 'Tap to select file';
+          _selectedKycBase64 = null;
+          _selectedKycBytes = null;
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Referral submitted successfully!'), backgroundColor: Colors.green));
@@ -335,6 +339,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         _refNameCtrl.clear();
         _refPhoneCtrl.clear();
         _selectedKycFile = 'Tap to select file';
+        _selectedKycBase64 = null;
+        _selectedKycBytes = null;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Referral saved locally!'), backgroundColor: Colors.green));
@@ -378,7 +384,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     String settlementId = 'stl_${DateTime.now().millisecondsSinceEpoch}';
     final securityPin = (settlementId.hashCode.abs() % 900000 + 100000).toString();
     final fsmId = AppState.currentUser?['parent_id'] ?? 'c3456789-de23-45ff-67ff-8901abcdef23';
-    final fsmName = AppState.currentUser?['parent_name'] ?? 'FSM Alpha';
+    final fsmName = AppState.currentUser?['parent_name'] ?? 'Field Sales Manager';
 
     try {
       final res = await http.post(
@@ -2142,7 +2148,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                                 setSheetState(() {
                                   selectedTransfer = {
                                     'id': 'tr_pin_${DateTime.now().millisecondsSinceEpoch}',
-                                    'from_name': AppState.currentUser?['parent_name'] ?? 'FSM Alpha',
+                                    'from_name': AppState.currentUser?['parent_name'] ?? 'Field Sales Manager',
                                     'product': {'name': 'Water Bottle', 'sku': 'WB-20L'},
                                     'quantity': 10,
                                     'status': 'pending',
@@ -2208,7 +2214,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                               children: [
                                 const Text('Dispatched By:', style: TextStyle(fontSize: 13, color: ClientColors.textMuted)),
                                 Text(
-                                  selectedTransfer!['from_name'] ?? 'FSM Alpha',
+                                  selectedTransfer!['from_name'] ?? 'Field Sales Manager',
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: ClientColors.textDark),
                                 ),
                               ],
@@ -2617,30 +2623,162 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 ),
                 const SizedBox(height: 12),
 
-                // KYC Upload Box (Dashed style)
-                InkWell(
-                  onTap: () {
-                    setState(() => _selectedKycFile = 'Aadhaar_Document_${DateTime.now().millisecondsSinceEpoch % 1000}.pdf');
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('KYC File attached: $_selectedKycFile')));
-                  },
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    decoration: BoxDecoration(
-                      color: ClientColors.creamBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: ClientColors.border, style: BorderStyle.solid),
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.cloud_upload_outlined, color: ClientColors.primary, size: 28),
-                        const SizedBox(height: 6),
-                        const Text('Upload KYC (Aadhaar/PAN)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
-                        const SizedBox(height: 2),
-                        Text(_selectedKycFile, style: const TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                // KYC Upload Box
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _selectedKycFile != 'Tap to select file' ? Colors.blue.withValues(alpha: 0.05) : ClientColors.creamBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _selectedKycFile != 'Tap to select file' ? Colors.blue.shade300 : ClientColors.border),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                _selectedKycFile != 'Tap to select file' ? Icons.check_circle : Icons.cloud_upload_outlined,
+                                color: _selectedKycFile != 'Tap to select file' ? Colors.green : ClientColors.primary,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('Upload KYC (Aadhaar / Govt ID)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
+                            ],
+                          ),
+                          if (_selectedKycFile != 'Tap to select file')
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _selectedKycFile = 'Tap to select file';
+                                  _selectedKycBase64 = null;
+                                  _selectedKycBytes = null;
+                                });
+                              },
+                              child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                      if (_selectedKycBytes != null) ...[
+                        const SizedBox(height: 10),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            _selectedKycBytes!,
+                            height: 110,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
                       ],
-                    ),
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () {
+                          showModalBottomSheet(
+                            context: context,
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                            builder: (sheetCtx) => SafeArea(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text('Attach KYC Document (Aadhaar/PAN)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    ),
+                                    ListTile(
+                                      leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
+                                      title: const Text('Take Photo with Camera'),
+                                      subtitle: const Text('Capture clear photo of physical ID proof'),
+                                      onTap: () async {
+                                        Navigator.pop(sheetCtx);
+                                        try {
+                                          final picker = ImagePicker();
+                                          final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 1600);
+                                          if (picked != null) {
+                                            final bytes = await picked.readAsBytes();
+                                            final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                            setState(() {
+                                              _selectedKycFile = picked.name;
+                                              _selectedKycBase64 = base64Str;
+                                              _selectedKycBytes = bytes;
+                                            });
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attached: ${picked.name}'), backgroundColor: Colors.green));
+                                            }
+                                          }
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    ListTile(
+                                      leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
+                                      title: const Text('Choose from Gallery / Photos'),
+                                      subtitle: const Text('Select image or document scan'),
+                                      onTap: () async {
+                                        Navigator.pop(sheetCtx);
+                                        try {
+                                          final picker = ImagePicker();
+                                          final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1600);
+                                          if (picked != null) {
+                                            final bytes = await picked.readAsBytes();
+                                            final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                            setState(() {
+                                              _selectedKycFile = picked.name;
+                                              _selectedKycBase64 = base64Str;
+                                              _selectedKycBytes = bytes;
+                                            });
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attached: ${picked.name}'), backgroundColor: Colors.green));
+                                            }
+                                          }
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: ClientColors.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _selectedKycFile != 'Tap to select file' ? Icons.check_circle : Icons.upload_file,
+                                size: 16,
+                                color: _selectedKycFile != 'Tap to select file' ? Colors.green : ClientColors.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _selectedKycFile,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: _selectedKycFile != 'Tap to select file' ? FontWeight.bold : FontWeight.normal,
+                                    color: _selectedKycFile != 'Tap to select file' ? Colors.black87 : ClientColors.textMuted,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                _selectedKycFile != 'Tap to select file' ? 'Change' : 'Attach',
+                                style: const TextStyle(fontSize: 11.5, color: ClientColors.primary, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),

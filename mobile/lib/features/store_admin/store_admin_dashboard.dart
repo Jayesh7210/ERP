@@ -1327,7 +1327,7 @@ class _FsmDistributionViewState extends State<_FsmDistributionView> {
                 final pName = t['product']?['name'] ?? 'Product #${t['product_id']}';
                 final qty = t['quantity'];
                 final date = t['created_at'] != null ? t['created_at'].toString().split('T').first : 'Today';
-                final destName = t['to_name'] ?? 'FSM Alpha';
+                final destName = t['to_name'] ?? 'Field Sales Manager';
 
                 return Card(
                   color: Colors.white,
@@ -2113,7 +2113,7 @@ class _DistributorSaleViewState extends State<_DistributorSaleView> {
   final TextEditingController _distPhoneController = TextEditingController();
 
   String? _selectedProductId;
-  final TextEditingController _qtyController = TextEditingController(text: '50');
+  final TextEditingController _qtyController = TextEditingController(text: '1');
   String _paymentMethod = 'online';
   bool _isSubmitting = false;
 

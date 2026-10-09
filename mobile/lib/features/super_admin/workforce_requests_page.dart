@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/colors.dart';
 import '../../core/state/app_state.dart';
@@ -31,9 +32,11 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _passwordReqController = TextEditingController(text: 'sales123');
-  final TextEditingController _aadhaarReqController = TextEditingController(text: '5489 1234 8901');
-  String _selectedReqKycFile = 'Aadhaar_Document_Verified.pdf';
+  final TextEditingController _passwordReqController = TextEditingController();
+  final TextEditingController _aadhaarReqController = TextEditingController();
+  String _selectedReqKycFile = '';
+  String? _selectedReqKycBase64;
+  Uint8List? _selectedReqKycBytes;
   String _selectedReqRole = 'salesman';
 
   @override
@@ -191,13 +194,14 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
     final color = _roleColor(role);
     final whName = _getWarehouseName(u) ?? 'Unassigned Hub';
     final parentName = _getParentName(u) ?? 'Direct to Super Admin';
-    final password = (u['password'] ?? 'sales123').toString();
+    final password = (u['password'] ?? '').toString();
     final phone = (u['phone'] ?? '').toString();
     final email = (u['email'] ?? '').toString();
     final name = (u['name'] ?? 'Worker').toString();
-    final aadhaarNumber = (u['aadhaar_number'] ?? '5489 1234 8901').toString();
-    final aadhaarDoc = (u['aadhaar_doc'] ?? u['kyc_doc'] ?? 'Aadhaar_Document.pdf').toString();
-    final kycStatus = (u['kyc_status'] ?? 'Verified').toString();
+    final aadhaarNumber = (u['aadhaar_number'] ?? '').toString();
+    final rawAadhaarDoc = (u['aadhaar_doc'] ?? u['kyc_doc'] ?? '').toString();
+    final aadhaarDoc = (rawAadhaarDoc == 'Aadhaar_Document.pdf') ? '' : rawAadhaarDoc;
+    final kycStatus = (u['kyc_status'] ?? (aadhaarDoc.isNotEmpty ? 'Verified' : 'Pending')).toString();
 
     showModalBottomSheet(
       context: context,
@@ -525,7 +529,11 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                                 const SizedBox(height: 2),
                                                 Text('Role: ${_roleDisplayName(role)}', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
                                                 const SizedBox(height: 2),
-                                                Text('Doc: $aadhaarDoc', style: const TextStyle(fontSize: 11, color: Colors.blueGrey), overflow: TextOverflow.ellipsis),
+                                                Text(
+                                                  'Doc: ${aadhaarDoc.isNotEmpty ? (aadhaarDoc.startsWith('data:image') ? 'KYC Photo Attached' : aadhaarDoc) : 'Not Uploaded'}',
+                                                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
                                               ],
                                             ),
                                           ),
@@ -535,15 +543,17 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                       const SizedBox(height: 10),
                                       Center(
                                         child: Text(
-                                          aadhaarNumber.length >= 12
-                                              ? '${aadhaarNumber.substring(0, 4)}  ${aadhaarNumber.substring(4, 8)}  ${aadhaarNumber.substring(8)}'
-                                              : aadhaarNumber,
-                                          style: const TextStyle(
-                                            fontFamily: 'monospace',
+                                          aadhaarNumber.isEmpty
+                                              ? 'No Aadhaar Number Provided'
+                                              : (aadhaarNumber.length >= 12
+                                                  ? '${aadhaarNumber.substring(0, 4)}  ${aadhaarNumber.substring(4, 8)}  ${aadhaarNumber.substring(8)}'
+                                                  : aadhaarNumber),
+                                          style: TextStyle(
+                                            fontFamily: aadhaarNumber.isNotEmpty ? 'monospace' : null,
                                             fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                            letterSpacing: 2,
-                                            color: Colors.black87,
+                                            fontSize: aadhaarNumber.isNotEmpty ? 16 : 13,
+                                            letterSpacing: aadhaarNumber.isNotEmpty ? 2 : 0.5,
+                                            color: aadhaarNumber.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
                                           ),
                                         ),
                                       ),
@@ -561,12 +571,19 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text('File: $aadhaarDoc', style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
-                                    TextButton.icon(
-                                      onPressed: () => _previewAadhaarDocument(name, aadhaarNumber, aadhaarDoc),
-                                      icon: const Icon(Icons.open_in_new, size: 14),
-                                      label: const Text('View Card Preview', style: TextStyle(fontSize: 12)),
+                                    Expanded(
+                                      child: Text(
+                                        'File: ${aadhaarDoc.isNotEmpty ? (aadhaarDoc.startsWith('data:image') ? 'Attached KYC Photo' : aadhaarDoc) : 'Not Uploaded'}',
+                                        style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
+                                    if (aadhaarDoc.isNotEmpty || aadhaarNumber.isNotEmpty)
+                                      TextButton.icon(
+                                        onPressed: () => _previewAadhaarDocument(name, aadhaarNumber, aadhaarDoc),
+                                        icon: const Icon(Icons.open_in_new, size: 14),
+                                        label: Text(aadhaarDoc.isNotEmpty ? 'View Document' : 'View ID Card', style: const TextStyle(fontSize: 12)),
+                                      ),
                                   ],
                                 ),
                               ],
@@ -733,87 +750,165 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
   }
 
   void _previewAadhaarDocument(String name, String aadhaarNo, String docName) {
+    if (docName.isEmpty && aadhaarNo.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No Aadhaar card or document uploaded for this user.')),
+      );
+      return;
+    }
+
+    Uint8List? imageBytes;
+    if (docName.startsWith('data:image/')) {
+      try {
+        imageBytes = base64Decode(docName.split(',').last);
+      } catch (_) {}
+    }
+
+    final isNetworkUrl = docName.startsWith('http://') || docName.startsWith('https://');
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Govt ID Document Proof', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.orange.shade100, Colors.white, Colors.green.shade100],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: Column(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.verified_user, color: Colors.blue, size: 20),
-                        SizedBox(width: 8),
-                        Text('AADHAAR IDENTIFICATION CARD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5)),
-                      ],
-                    ),
-                    const Divider(height: 20),
-                    Row(
-                      children: [
-                        CircleAvatar(radius: 28, backgroundColor: Colors.grey.shade300, child: const Icon(Icons.person, size: 36, color: Colors.white)),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                              const SizedBox(height: 2),
-                              const Text('Government Verified Profile', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Text('File: $docName', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-                      child: Text(
-                        aadhaarNo,
-                        style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 2.5),
-                      ),
-                    ),
+                    const Text('Govt ID Document Proof', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(42),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                const SizedBox(height: 10),
+
+                // If real image bytes exist, show the actual photo!
+                if (imageBytes != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      constraints: const BoxConstraints(maxHeight: 280),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.black12,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: InteractiveViewer(
+                        child: Image.memory(
+                          imageBytes,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ] else if (isNetworkUrl) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      constraints: const BoxConstraints(maxHeight: 280),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.black12,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: InteractiveViewer(
+                        child: Image.network(
+                          docName,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // Aadhaar Profile Details Card
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.orange.shade100, Colors.white, Colors.green.shade100],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    children: [
+                      const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.verified_user, color: Colors.blue, size: 20),
+                          SizedBox(width: 8),
+                          Text('AADHAAR IDENTIFICATION CARD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5)),
+                        ],
+                      ),
+                      const Divider(height: 20),
+                      Row(
+                        children: [
+                          CircleAvatar(radius: 28, backgroundColor: Colors.grey.shade300, child: const Icon(Icons.person, size: 36, color: Colors.white)),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                const SizedBox(height: 2),
+                                const Text('Government Verified Profile', style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.w600)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  docName.isNotEmpty
+                                      ? (docName.startsWith('data:image') ? 'Attached KYC Photo (Verified)' : 'File: $docName')
+                                      : 'No document file uploaded',
+                                  style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+                        child: Text(
+                          aadhaarNo.isNotEmpty ? aadhaarNo : 'Aadhaar No. Not Provided',
+                          style: TextStyle(
+                            fontFamily: aadhaarNo.isNotEmpty ? 'monospace' : null,
+                            fontWeight: FontWeight.bold,
+                            fontSize: aadhaarNo.isNotEmpty ? 18 : 13,
+                            letterSpacing: aadhaarNo.isNotEmpty ? 2.5 : 0.5,
+                            color: aadhaarNo.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: const Text('Close Preview'),
-              ),
-            ],
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(42),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('Close Preview'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -858,9 +953,19 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
     final nameCtrl = TextEditingController(text: editUser?['name'] ?? '');
     final emailCtrl = TextEditingController(text: editUser?['email'] ?? '');
     final phoneCtrl = TextEditingController(text: editUser?['phone'] ?? '');
-    final passwordCtrl = TextEditingController(text: editUser?['password'] ?? '123456');
-    final aadhaarCtrl = TextEditingController(text: editUser?['aadhaar_number'] ?? '5489 1234 8901');
-    String selectedKycDoc = editUser?['aadhaar_doc'] ?? editUser?['kyc_doc'] ?? 'Aadhaar_Document.pdf';
+    final passwordCtrl = TextEditingController(text: editUser?['password'] ?? '');
+    final aadhaarCtrl = TextEditingController(text: editUser?['aadhaar_number'] ?? '');
+    
+    final rawKycDoc = (editUser?['aadhaar_doc'] ?? editUser?['kyc_doc'] ?? '').toString();
+    String selectedKycDoc = (rawKycDoc == 'Aadhaar_Document.pdf') ? '' : rawKycDoc;
+    String? selectedKycBase64;
+    Uint8List? selectedKycBytes;
+
+    if (selectedKycDoc.startsWith('data:image/')) {
+      try {
+        selectedKycBytes = base64Decode(selectedKycDoc.split(',').last);
+      } catch (_) {}
+    }
 
     String selectedRole = editUser?['role'] ?? 'salesman';
     String? selectedWarehouseId = editUser?['warehouse_id']?.toString();
@@ -873,6 +978,75 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
+            Future<void> pickStaffDoc(ImageSource source) async {
+              try {
+                final picker = ImagePicker();
+                final picked = await picker.pickImage(source: source, imageQuality: 85, maxWidth: 1600);
+                if (picked != null) {
+                  final bytes = await picked.readAsBytes();
+                  final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                  setDialogState(() {
+                    selectedKycDoc = picked.name;
+                    selectedKycBase64 = base64Str;
+                    selectedKycBytes = bytes;
+                  });
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Attached Aadhaar Document: ${picked.name}'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not attach document: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              }
+            }
+
+            void showStaffDocSourceSheet() {
+              showModalBottomSheet(
+                context: context,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                builder: (sheetCtx) => SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: Text('Attach Aadhaar Document / KYC', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        ),
+                        ListTile(
+                          leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
+                          title: const Text('Take Photo with Camera'),
+                          subtitle: const Text('Capture clear photo of physical Aadhaar card'),
+                          onTap: () {
+                            Navigator.pop(sheetCtx);
+                            pickStaffDoc(ImageSource.camera);
+                          },
+                        ),
+                        ListTile(
+                          leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
+                          title: const Text('Choose from Gallery / Device'),
+                          subtitle: const Text('Select Aadhaar card image or scan'),
+                          onTap: () {
+                            Navigator.pop(sheetCtx);
+                            pickStaffDoc(ImageSource.gallery);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
@@ -929,6 +1103,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                       controller: passwordCtrl,
                       decoration: InputDecoration(
                         labelText: 'Login Password *',
+                        hintText: 'Enter login password for staff',
                         prefixIcon: const Icon(Icons.lock_outline),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -948,39 +1123,96 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                     ),
                     const SizedBox(height: 12),
 
-                    // Aadhaar Document Attached
-                    InkWell(
-                      onTap: () {
-                        setDialogState(() {
-                          selectedKycDoc = 'Aadhaar_${nameCtrl.text.replaceAll(' ', '_')}_Verified.pdf';
-                        });
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Aadhaar Document attached: $selectedKycDoc')),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.grey.shade300),
+                    // Aadhaar Document Attachment
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: selectedKycDoc.isNotEmpty ? Colors.blue.withValues(alpha: 0.05) : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selectedKycDoc.isNotEmpty ? Colors.blue.shade300 : Colors.grey.shade300,
+                          width: selectedKycDoc.isNotEmpty ? 1.5 : 1,
                         ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.file_present, color: Colors.blue),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                selectedKycDoc.isNotEmpty ? Icons.verified : Icons.credit_card,
+                                color: selectedKycDoc.isNotEmpty ? Colors.blue : Colors.grey.shade600,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text('Aadhaar Card Document (KYC)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                              const Spacer(),
+                              if (selectedKycDoc.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () {
+                                    setDialogState(() {
+                                      selectedKycDoc = '';
+                                      selectedKycBase64 = null;
+                                      selectedKycBytes = null;
+                                    });
+                                  },
+                                  child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
+                                ),
+                            ],
+                          ),
+                          if (selectedKycBytes != null) ...[
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(
+                                selectedKycBytes!,
+                                height: 110,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          InkWell(
+                            onTap: showStaffDocSourceSheet,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Row(
                                 children: [
-                                  const Text('Aadhaar Card Document (KYC)', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                                  Text(selectedKycDoc, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                  Icon(
+                                    selectedKycDoc.isNotEmpty ? Icons.check_circle : Icons.upload_file,
+                                    size: 16,
+                                    color: selectedKycDoc.isNotEmpty ? Colors.green : Colors.blue,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      selectedKycDoc.isNotEmpty
+                                          ? (selectedKycDoc.startsWith('data:image') ? 'KYC Photo Attached' : selectedKycDoc)
+                                          : 'Tap to take photo or choose file',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: selectedKycDoc.isNotEmpty ? FontWeight.bold : FontWeight.normal,
+                                        color: selectedKycDoc.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Text(
+                                    selectedKycDoc.isNotEmpty ? 'Change' : 'Attach',
+                                    style: const TextStyle(fontSize: 11.5, color: Colors.blue, fontWeight: FontWeight.bold),
+                                  ),
                                 ],
                               ),
                             ),
-                            const Text('Tap to Attach', style: TextStyle(fontSize: 11, color: Colors.blue)),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -1071,7 +1303,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                             'phone': phoneCtrl.text.trim(),
                             'password': passwordCtrl.text.trim(),
                             'aadhaar_number': aadhaarCtrl.text.trim(),
-                            'aadhaar_doc': selectedKycDoc,
+                            'aadhaar_doc': selectedKycBase64 ?? selectedKycDoc,
                             'role': selectedRole,
                             'warehouse_id': selectedWarehouseId,
                             'parent_id': selectedParentId,
@@ -1206,7 +1438,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
           'phone': _phoneController.text.trim(),
           'password': _passwordReqController.text.trim(),
           'aadhaar_number': _aadhaarReqController.text.trim(),
-          'kyc_doc': _selectedReqKycFile,
+          'kyc_doc': _selectedReqKycBase64 ?? _selectedReqKycFile,
           'role': _selectedReqRole,
           'requested_by': AppState.currentUser?['id'],
           'warehouse_id': AppState.currentUser?['warehouse_id'],
@@ -1220,6 +1452,13 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
       _nameController.clear();
       _emailController.clear();
       _phoneController.clear();
+      _passwordReqController.clear();
+      _aadhaarReqController.clear();
+      setState(() {
+        _selectedReqKycFile = '';
+        _selectedReqKycBase64 = null;
+        _selectedReqKycBytes = null;
+      });
       _loadRequests();
     } catch (_) {
       if (!mounted) return;
@@ -1229,6 +1468,13 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
       _nameController.clear();
       _emailController.clear();
       _phoneController.clear();
+      _passwordReqController.clear();
+      _aadhaarReqController.clear();
+      setState(() {
+        _selectedReqKycFile = '';
+        _selectedReqKycBase64 = null;
+        _selectedReqKycBytes = null;
+      });
     }
   }
 
@@ -1573,9 +1819,10 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
           final req = _requests[idx];
           final role = (req['role'] ?? 'salesman').toString();
           final color = _roleColor(role);
-          final aadhaarNo = (req['aadhaar_number'] ?? '5489 1234 8901').toString();
-          final kycDoc = (req['kyc_doc'] ?? req['aadhaar_doc'] ?? 'Aadhaar_Document.pdf').toString();
-          final password = (req['password'] ?? 'sales123').toString();
+          final aadhaarNo = (req['aadhaar_number'] ?? '').toString();
+          final rawKycDoc = (req['kyc_doc'] ?? req['aadhaar_doc'] ?? '').toString();
+          final kycDoc = (rawKycDoc == 'Aadhaar_Document.pdf') ? '' : rawKycDoc;
+          final password = (req['password'] ?? '').toString();
 
           return Card(
             color: AppColors.cardBg,
@@ -1622,7 +1869,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                           children: [
                             const Icon(Icons.vpn_key_rounded, size: 14, color: Colors.orange),
                             const SizedBox(width: 6),
-                            Text('Initial Password: $password', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange)),
+                            Text('Initial Password: ${password.isNotEmpty ? password : 'None set'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange)),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -1633,15 +1880,16 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                               children: [
                                 const Icon(Icons.credit_card, size: 14, color: Colors.blue),
                                 const SizedBox(width: 6),
-                                Text('Aadhaar: $aadhaarNo', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Text('Aadhaar: ${aadhaarNo.isNotEmpty ? aadhaarNo : 'Not provided'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                               ],
                             ),
-                            TextButton.icon(
-                              onPressed: () => _previewAadhaarDocument(req['name'] ?? 'Worker', aadhaarNo, kycDoc),
-                              icon: const Icon(Icons.open_in_new, size: 12),
-                              label: const Text('View Aadhaar', style: TextStyle(fontSize: 11)),
-                              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
-                            ),
+                            if (kycDoc.isNotEmpty || aadhaarNo.isNotEmpty)
+                              TextButton.icon(
+                                onPressed: () => _previewAadhaarDocument(req['name'] ?? 'Worker', aadhaarNo, kycDoc),
+                                icon: const Icon(Icons.open_in_new, size: 12),
+                                label: Text(kycDoc.isNotEmpty ? 'View Aadhaar' : 'View ID', style: const TextStyle(fontSize: 11)),
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
+                              ),
                           ],
                         ),
                       ],
@@ -1720,39 +1968,156 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                   const SizedBox(height: 12),
 
                   // Aadhaar Document Upload
-                  InkWell(
-                    onTap: () {
-                      setState(() {
-                        _selectedReqKycFile = 'Aadhaar_${_nameController.text.replaceAll(' ', '_')}_Upload.pdf';
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Aadhaar Document attached: $_selectedReqKycFile')),
-                      );
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _selectedReqKycFile.isNotEmpty ? Colors.blue.withValues(alpha: 0.05) : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _selectedReqKycFile.isNotEmpty ? Colors.blue.shade300 : Colors.grey.shade300,
+                        width: _selectedReqKycFile.isNotEmpty ? 1.5 : 1,
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.cloud_upload_outlined, color: AppColors.primary),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _selectedReqKycFile.isNotEmpty ? Icons.verified : Icons.credit_card,
+                              color: _selectedReqKycFile.isNotEmpty ? Colors.blue : Colors.grey.shade600,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text('Upload Aadhaar Card (KYC)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            const Spacer(),
+                            if (_selectedReqKycFile.isNotEmpty)
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    _selectedReqKycFile = '';
+                                    _selectedReqKycBase64 = null;
+                                    _selectedReqKycBytes = null;
+                                  });
+                                },
+                                child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
+                        ),
+                        if (_selectedReqKycBytes != null) ...[
+                          const SizedBox(height: 10),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(
+                              _selectedReqKycBytes!,
+                              height: 110,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        InkWell(
+                          onTap: () {
+                            showModalBottomSheet(
+                              context: context,
+                              shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                              builder: (sheetCtx) => SafeArea(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Padding(
+                                        padding: EdgeInsets.only(bottom: 8),
+                                        child: Text('Attach Aadhaar Document / KYC', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                      ),
+                                      ListTile(
+                                        leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
+                                        title: const Text('Take Photo with Camera'),
+                                        subtitle: const Text('Capture clear photo of physical Aadhaar card'),
+                                        onTap: () async {
+                                          Navigator.pop(sheetCtx);
+                                          try {
+                                            final picker = ImagePicker();
+                                            final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 1600);
+                                            if (picked != null) {
+                                              final bytes = await picked.readAsBytes();
+                                              final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                              setState(() {
+                                                _selectedReqKycFile = picked.name;
+                                                _selectedReqKycBase64 = base64Str;
+                                                _selectedReqKycBytes = bytes;
+                                              });
+                                            }
+                                          } catch (_) {}
+                                        },
+                                      ),
+                                      ListTile(
+                                        leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
+                                        title: const Text('Choose from Gallery / Device'),
+                                        subtitle: const Text('Select Aadhaar card image or scan'),
+                                        onTap: () async {
+                                          Navigator.pop(sheetCtx);
+                                          try {
+                                            final picker = ImagePicker();
+                                            final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1600);
+                                            if (picked != null) {
+                                              final bytes = await picked.readAsBytes();
+                                              final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                              setState(() {
+                                                _selectedReqKycFile = picked.name;
+                                                _selectedReqKycBase64 = base64Str;
+                                                _selectedReqKycBytes = bytes;
+                                              });
+                                            }
+                                          } catch (_) {}
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: Row(
                               children: [
-                                const Text('Upload Aadhaar Card (KYC)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                Text(_selectedReqKycFile, style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                                Icon(
+                                  _selectedReqKycFile.isNotEmpty ? Icons.check_circle : Icons.upload_file,
+                                  size: 16,
+                                  color: _selectedReqKycFile.isNotEmpty ? Colors.green : Colors.blue,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _selectedReqKycFile.isNotEmpty
+                                        ? (_selectedReqKycFile.startsWith('data:image') ? 'KYC Photo Attached' : _selectedReqKycFile)
+                                        : 'Tap to take photo or choose file',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: _selectedReqKycFile.isNotEmpty ? FontWeight.bold : FontWeight.normal,
+                                      color: _selectedReqKycFile.isNotEmpty ? Colors.black87 : Colors.grey.shade600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  _selectedReqKycFile.isNotEmpty ? 'Change' : 'Attach',
+                                  style: const TextStyle(fontSize: 11.5, color: Colors.blue, fontWeight: FontWeight.bold),
+                                ),
                               ],
                             ),
                           ),
-                          const Text('Change', style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
