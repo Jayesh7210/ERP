@@ -1010,7 +1010,8 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
 
             void showStaffDocSourceSheet() {
               showModalBottomSheet(
-                context: context,
+                context: ctx,
+                useRootNavigator: true,
                 shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
                 builder: (sheetCtx) => SafeArea(
                   child: Padding(
@@ -1145,9 +1146,15 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
-                              const Text('Aadhaar Card Document (KYC)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                              const Spacer(),
-                              if (selectedKycDoc.isNotEmpty)
+                              const Expanded(
+                                child: Text(
+                                  'Aadhaar Document (KYC)',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (selectedKycDoc.isNotEmpty) ...[
+                                const SizedBox(width: 8),
                                 GestureDetector(
                                   onTap: () {
                                     setDialogState(() {
@@ -1158,6 +1165,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                   },
                                   child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
                                 ),
+                              ],
                             ],
                           ),
                           if (selectedKycBytes != null) ...[
@@ -1989,9 +1997,15 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                               size: 18,
                             ),
                             const SizedBox(width: 8),
-                            const Text('Upload Aadhaar Card (KYC)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                            const Spacer(),
-                            if (_selectedReqKycFile.isNotEmpty)
+                            const Expanded(
+                              child: Text(
+                                'Upload Aadhaar Card (KYC)',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (_selectedReqKycFile.isNotEmpty) ...[
+                              const SizedBox(width: 8),
                               GestureDetector(
                                 onTap: () {
                                   setState(() {
@@ -2002,6 +2016,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                 },
                                 child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
                               ),
+                            ],
                           ],
                         ),
                         if (_selectedReqKycBytes != null) ...[

@@ -112,6 +112,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
 
   // Stock Tab State
   String? _proofPhotoName;
+  Uint8List? _proofPhotoBytes;
+  String? _proofPhotoBase64;
   bool _isStockAccepted = false;
   List<Map<String, dynamic>> _stockHistory = [];
 
@@ -981,8 +983,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   }
 
   Future<void> _executeSale(int qty, double totalAmt) async {
+    String receiptId = 'RCP-${DateTime.now().millisecondsSinceEpoch % 100000}';
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('${AppState.apiBaseUrl}/sales'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -997,6 +1000,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           'customer_address': _isNewCustomer ? _saleCustAddressCtrl.text.trim() : null,
         }),
       );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final data = jsonDecode(res.body);
+        if (data != null && data['id'] != null) {
+          receiptId = data['id'].toString();
+        }
+      }
     } catch (_) {}
 
     // Update local state
@@ -1022,7 +1031,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _infoRow('Receipt ID:', 'RCP-${DateTime.now().millisecondsSinceEpoch % 100000}'),
+              _infoRow('Receipt ID:', receiptId),
               _infoRow('Bottles Sold:', '$qty Bottles'),
               _infoRow('Unit Price:', '₹$_bottleUnitPrice'),
               _infoRow('Total Collected:', '₹$totalAmt'),
@@ -1803,20 +1812,168 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 _verificationRow('Value', '₹${(_totalDispatchedBottles * _bottleUnitPrice).toInt()}'),
                 const SizedBox(height: 14),
 
-                // Capture Proof Photo Outlined Button
-                OutlinedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _proofPhotoName = 'Proof_IMG_${DateTime.now().millisecondsSinceEpoch % 10000}.jpg';
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ Proof photo captured: $_proofPhotoName')));
-                  },
-                  icon: const Icon(Icons.camera_alt_outlined, color: ClientColors.textDark, size: 16),
-                  label: Text(_proofPhotoName ?? 'Capture Proof Photo', style: const TextStyle(color: ClientColors.textDark, fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                    side: const BorderSide(color: ClientColors.border),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                // Capture Proof Photo with Camera / Gallery
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _proofPhotoName != null ? Colors.blue.withValues(alpha: 0.05) : ClientColors.cardBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _proofPhotoName != null ? Colors.blue.shade300 : ClientColors.border,
+                      width: _proofPhotoName != null ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            _proofPhotoName != null ? Icons.verified : Icons.camera_alt_outlined,
+                            size: 18,
+                            color: _proofPhotoName != null ? Colors.blue : ClientColors.textDark,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Handover Proof Photo (Optional)',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (_proofPhotoName != null) ...[
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _proofPhotoName = null;
+                                  _proofPhotoBase64 = null;
+                                  _proofPhotoBytes = null;
+                                });
+                              },
+                              child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (_proofPhotoBytes != null) ...[
+                        const SizedBox(height: 10),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            _proofPhotoBytes!,
+                            height: 110,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: () {
+                          showModalBottomSheet(
+                            context: context,
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+                            builder: (sheetCtx) => SafeArea(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(bottom: 8),
+                                      child: Text('Attach Stock Handover Proof', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    ),
+                                    ListTile(
+                                      leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
+                                      title: const Text('Take Photo with Camera'),
+                                      subtitle: const Text('Capture photo of received stock crates'),
+                                      onTap: () async {
+                                        Navigator.pop(sheetCtx);
+                                        try {
+                                          final picker = ImagePicker();
+                                          final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 1600);
+                                          if (picked != null) {
+                                            final bytes = await picked.readAsBytes();
+                                            final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                            setState(() {
+                                              _proofPhotoName = picked.name;
+                                              _proofPhotoBase64 = base64Str;
+                                              _proofPhotoBytes = bytes;
+                                            });
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attached: ${picked.name}'), backgroundColor: Colors.green));
+                                            }
+                                          }
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    ListTile(
+                                      leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
+                                      title: const Text('Choose from Gallery / Photos'),
+                                      subtitle: const Text('Select existing proof picture'),
+                                      onTap: () async {
+                                        Navigator.pop(sheetCtx);
+                                        try {
+                                          final picker = ImagePicker();
+                                          final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1600);
+                                          if (picked != null) {
+                                            final bytes = await picked.readAsBytes();
+                                            final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+                                            setState(() {
+                                              _proofPhotoName = picked.name;
+                                              _proofPhotoBase64 = base64Str;
+                                              _proofPhotoBytes = bytes;
+                                            });
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attached: ${picked.name}'), backgroundColor: Colors.green));
+                                            }
+                                          }
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: ClientColors.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _proofPhotoName != null ? Icons.check_circle : Icons.upload_file,
+                                size: 16,
+                                color: _proofPhotoName != null ? Colors.green : ClientColors.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _proofPhotoName ?? 'Tap to take photo or choose file',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: _proofPhotoName != null ? FontWeight.bold : FontWeight.normal,
+                                    color: _proofPhotoName != null ? Colors.black87 : ClientColors.textMuted,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                _proofPhotoName != null ? 'Change' : 'Attach',
+                                style: const TextStyle(fontSize: 11.5, color: ClientColors.primary, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -1838,6 +1995,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                               'bottles': _currentStock,
                               'amount': (_currentStock * _bottleUnitPrice).toInt(),
                               'status': 'SETTLED',
+                              'proof_photo': _proofPhotoBase64 ?? _proofPhotoName,
                             });
                           });
                           ScaffoldMessenger.of(context).showSnackBar(
