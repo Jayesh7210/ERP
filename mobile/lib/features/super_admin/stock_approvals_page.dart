@@ -338,8 +338,8 @@ class _StockApprovalsPageState extends State<StockApprovalsPage> with SingleTick
           Expanded(
             child: _inwards.isEmpty
                 ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [

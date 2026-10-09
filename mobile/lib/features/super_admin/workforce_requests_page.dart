@@ -882,8 +882,12 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                     child: Icon(editUser != null ? Icons.manage_accounts : Icons.person_add, color: AppColors.primary),
                   ),
                   const SizedBox(width: 10),
-                  Text(editUser != null ? 'Edit Staff Account' : 'Add Staff Account',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  Expanded(
+                    child: Text(
+                      editUser != null ? 'Edit Staff Account' : 'Add Staff Account',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                  ),
                 ],
               ),
               content: SingleChildScrollView(

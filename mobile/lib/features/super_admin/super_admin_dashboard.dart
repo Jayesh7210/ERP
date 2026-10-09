@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -767,12 +768,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: selectedRole,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Buyer / Tier Role'),
                 items: const [
-                  DropdownMenuItem(value: 'store_admin', child: Text('Warehouse Admin (Store Admin)')),
-                  DropdownMenuItem(value: 'field_sales_manager', child: Text('Field Sales Manager')),
-                  DropdownMenuItem(value: 'salesman', child: Text('Salesman (Retail Rate)')),
-                  DropdownMenuItem(value: 'distributor', child: Text('Distributor (Bulk Wholesale Rate)')),
+                  DropdownMenuItem(value: 'store_admin', child: Text('Warehouse Admin (Store Admin)', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'field_sales_manager', child: Text('Field Sales Manager', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'salesman', child: Text('Salesman (Retail Rate)', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'distributor', child: Text('Distributor (Bulk Wholesale Rate)', overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) {
                   if (v != null) {
@@ -857,7 +859,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             children: [
               Icon(Icons.tune, color: AppColors.primary),
               SizedBox(width: 8),
-              Text('Workforce Referral Policy'),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text('Workforce Referral Policy'),
+                ),
+              ),
             ],
           ),
           content: SingleChildScrollView(
@@ -1241,11 +1249,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   ),
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _kpiMiniCol('Active Workforce', '${_workforce.length} staff', () => setState(() => _activeModule = 1)),
-                      _kpiMiniCol('Warehouses', '${_warehouses.length} hubs', () => setState(() => _activeModule = 9)),
-                      _kpiMiniCol('Products', '${_products.length} SKUs', () => setState(() => _activeModule = 3)),
+                      Expanded(child: _kpiMiniCol('Active Workforce', '${_workforce.length} staff', () => setState(() => _activeModule = 1))),
+                      Expanded(child: _kpiMiniCol('Warehouses', '${_warehouses.length} hubs', () => setState(() => _activeModule = 9))),
+                      Expanded(child: _kpiMiniCol('Products', '${_products.length} SKUs', () => setState(() => _activeModule = 3))),
                     ],
                   )
                 ],
@@ -1321,7 +1328,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.3,
+            childAspectRatio: 1.08,
             children: [
               _moduleCard(Icons.group_outlined, 'Workforce & Users', '${_workforce.length} Accounts', () => setState(() => _activeModule = 1)),
               _moduleCard(Icons.security_outlined, 'Role Permissions', 'Dynamic RBAC Matrix', () => setState(() => _activeModule = 2)),
@@ -1403,10 +1410,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Widget _kpiMiniCol(String label, String value, [VoidCallback? onTap]) {
     final col = Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+        ),
       ],
     );
     if (onTap != null) {
@@ -1414,7 +1428,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: col,
         ),
       );
@@ -1431,16 +1445,30 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircleAvatar(backgroundColor: AppColors.primary.withValues(alpha: 0.1), child: Icon(icon, color: AppColors.primary)),
-              const Spacer(),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                child: Icon(icon, color: AppColors.primary, size: 20),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(
+                subtitle,
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10.5),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -1793,14 +1821,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      isAvail ? 'Product Available for Ordering' : 'Product Marked Not Available',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: isAvail ? Colors.green.shade900 : Colors.red.shade900,
+                                    Expanded(
+                                      child: Text(
+                                        isAvail ? 'Product Available for Ordering' : 'Product Marked Not Available',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: isAvail ? Colors.green.shade900 : Colors.red.shade900,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
+                                    const SizedBox(width: 4),
                                     Row(
                                       children: [
                                         Text(
@@ -1957,16 +1989,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Row(
-                                children: [
-                                  Icon(Icons.shield_outlined, color: Colors.white70, size: 16),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'WORKFORCE REFERRAL POLICY',
-                                    style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
-                                  ),
-                                ],
+                              const Expanded(
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.shield_outlined, color: Colors.white70, size: 16),
+                                    SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'WORKFORCE REFERRAL POLICY',
+                                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
+                              const SizedBox(width: 8),
                               Chip(
                                 label: Text(isProgramActive ? 'ACTIVE' : 'PAUSED'),
                                 backgroundColor: isProgramActive ? Colors.green : Colors.grey,
@@ -2390,13 +2428,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         children: [
           Container(
             color: Colors.white,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _subTabButton(0, 'Global Balances'),
-                _subTabButton(1, 'Transfer Ledger'),
-                _subTabButton(2, 'Low Stock (${_alerts.length})'),
-              ],
+            width: double.infinity,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _subTabButton(0, 'Global Balances'),
+                  _subTabButton(1, 'Transfer Ledger'),
+                  _subTabButton(2, 'Low Stock (${_alerts.length})'),
+                ],
+              ),
             ),
           ),
           const Divider(height: 1),
