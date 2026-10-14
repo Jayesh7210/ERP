@@ -1,9 +1,9 @@
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/colors.dart';
 import '../../core/state/app_state.dart';
+import '../../core/services/offline_sync_service.dart';
 import 'workforce_requests_page.dart';
 
 class SuperAdminDashboard extends StatefulWidget {
@@ -14,7 +14,8 @@ class SuperAdminDashboard extends StatefulWidget {
 }
 
 class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
-  int _activeModule = 0; // 0: Hub, 1: Users, 2: Permissions, 3: Products/Pricing, 4: Referrals, 5: Inventory/Transfers, 6: Sales, 7: Audit Logs
+  int _activeModule =
+      0; // 0: Hub, 1: Users, 2: Permissions, 3: Products/Pricing, 4: Referrals, 5: Inventory/Transfers, 6: Sales, 7: Audit Logs
 
   final List<Map<String, dynamic>> _sales = [];
   final List<Map<String, dynamic>> _workforce = [];
@@ -33,7 +34,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     'commission_per_bottle': 1.0,
     'min_sales_quota': 5,
     'is_quota_condition_active': true,
-    'is_active': true
+    'is_active': true,
   };
   int _referralSubTab = 0; // 0: Workforce Tree, 1: Commission Ledger
   Map<String, dynamic> _referralTreeData = {};
@@ -46,13 +47,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   String _settlementFilter = 'all';
   int _inventorySubTab = 0; // 0: Global Stock, 1: Transfers, 2: Alerts
   String _productSearchQuery = '';
-  String _productAvailabilityFilter = 'all'; // 'all', 'available', 'not_available'
+  String _productAvailabilityFilter =
+      'all'; // 'all', 'available', 'not_available'
   final TextEditingController _productSearchCtrl = TextEditingController();
   String _warehouseSearchQuery = '';
   final TextEditingController _warehouseSearchCtrl = TextEditingController();
   final List<Map<String, dynamic>> _payments = [];
   Map<String, dynamic> _paymentsSummary = {};
-  String _paymentTypeFilter = 'all'; // 'all', 'sale', 'settlement', 'referral_payout'
+  String _paymentTypeFilter =
+      'all'; // 'all', 'sale', 'settlement', 'referral_payout'
   String _paymentMethodFilter = 'all'; // 'all', 'online', 'cash'
   String _paymentSearchQuery = '';
   final TextEditingController _paymentSearchCtrl = TextEditingController();
@@ -91,34 +94,142 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       _loadPayments(),
     ]);
     if (mounted) setState(() => _isLoading = false);
+
+    // Auto-sync any offline actions in the background
+    _syncPendingActions(silent: true);
+  }
+
+  bool _isSyncingOffline = false;
+
+  Future<void> _syncPendingActions({bool silent = false}) async {
+    if (_isSyncingOffline) return;
+    final count = await OfflineSyncService.getPendingCount();
+    if (count == 0) return;
+
+    if (mounted) setState(() => _isSyncingOffline = true);
+
+    try {
+      final res = await OfflineSyncService.syncAll(apiBaseUrl: AppState.apiBaseUrl);
+
+      if (mounted) {
+        if (res.synced > 0) {
+          _loadSummary();
+          _loadSales();
+          _loadGlobalStocks();
+          _loadTransfers();
+          if (!silent) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Synced ${res.synced} offline transaction${res.synced > 1 ? 's' : ''} to server!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else if (!silent && res.failed > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Sync failed: ${res.errors.isNotEmpty ? res.errors.first : 'Connection error'}'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSyncingOffline = false);
+    }
+  }
+
+  Widget _buildOfflineSyncBanner() {
+    return ValueListenableBuilder<int>(
+      valueListenable: OfflineSyncService.pendingCountNotifier,
+      builder: (context, pendingCount, _) {
+        if (pendingCount == 0) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3CD),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFFEEBA)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.cloud_upload_outlined, color: Color(0xFFB45309), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$pendingCount Offline Action${pendingCount > 1 ? 's' : ''} Stored',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF451A03)),
+                    ),
+                    const Text(
+                      'Saved on device. Tap to sync all to server.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF78350F)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _isSyncingOffline ? null : () => _syncPendingActions(silent: false),
+                icon: _isSyncingOffline
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.sync, size: 14),
+                label: Text(
+                  _isSyncingOffline ? 'Syncing...' : 'Sync Now',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFB45309),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadSummary() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/reports/summary'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/reports/summary'),
+      );
       if (res.statusCode == 200) {
         setState(() => _summary = jsonDecode(res.body));
       }
     } catch (_) {
-      setState(() => _summary = {
-        'totalRevenue': 0.0,
-        'userCount': 1,
-        'productCount': 0,
-        'warehouseCount': 0,
-        'pendingReferralPayouts': 0.0,
-        'totalStock': 0,
-        'todaySalesAmount': 0.0,
-        'todaySalesBottles': 0,
-        'todaySalesCount': 0,
-        'pendingSettlementCount': 0,
-        'pendingSettlementAmount': 0.0,
-      });
+      setState(
+        () => _summary = {
+          'totalRevenue': 0.0,
+          'userCount': 1,
+          'productCount': 0,
+          'warehouseCount': 0,
+          'pendingReferralPayouts': 0.0,
+          'totalStock': 0,
+          'todaySalesAmount': 0.0,
+          'todaySalesBottles': 0,
+          'todaySalesCount': 0,
+          'pendingSettlementCount': 0,
+          'pendingSettlementAmount': 0.0,
+        },
+      );
     }
   }
 
   Future<void> _loadSales() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/sales/report'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/sales/report'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -135,7 +246,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadSettlements() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/settlements'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/settlements'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -159,7 +272,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           setState(() {
             _payments.clear();
             if (data['payments'] is List) {
-              _payments.addAll((data['payments'] as List).cast<Map<String, dynamic>>());
+              _payments.addAll(
+                (data['payments'] as List).cast<Map<String, dynamic>>(),
+              );
             }
             if (data['summary'] is Map<String, dynamic>) {
               _paymentsSummary = data['summary'];
@@ -175,20 +290,27 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     for (final s in _sales) {
       synthesized.add({
         'id': 'pay_${s['id']}',
-        'payment_no': 'PAY-SAL-${s['id'].toString().length > 5 ? s['id'].toString().substring(s['id'].toString().length - 5).toUpperCase() : s['id']}',
+        'payment_no':
+            'PAY-SAL-${s['id'].toString().length > 5 ? s['id'].toString().substring(s['id'].toString().length - 5).toUpperCase() : s['id']}',
         'type': 'sale',
-        'category': (s['customer_type'] == 'distributor') ? 'Wholesale Bulk Sale' : 'Retail Sale',
+        'category': (s['customer_type'] == 'distributor')
+            ? 'Wholesale Bulk Sale'
+            : 'Retail Sale',
         'amount': double.tryParse(s['amount']?.toString() ?? '0') ?? 0.0,
         'payment_method': s['payment_method'] ?? 'online',
         'status': 'completed',
-        'payer_name': s['customer']?['name'] ?? s['customer_name'] ?? 'Retail Customer',
+        'payer_name':
+            s['customer']?['name'] ?? s['customer_name'] ?? 'Retail Customer',
         'payer_phone': s['customer']?['phone'] ?? '',
         'payer_type': s['customer_type'] ?? 'retail',
         'collector_name': s['salesman']?['name'] ?? 'Staff',
         'collector_role': s['salesman']?['role'] ?? 'salesman',
-        'item_description': '${s['quantity'] ?? 1}x ${s['product']?['name'] ?? 'Product'}',
+        'item_description':
+            '${s['quantity'] ?? 1}x ${s['product']?['name'] ?? 'Product'}',
         'reference_id': s['id'],
-        'notes': s['referral_code'] != null ? 'Ref: ${s['referral_code']}' : 'Payment received',
+        'notes': s['referral_code'] != null
+            ? 'Ref: ${s['referral_code']}'
+            : 'Payment received',
         'created_at': s['created_at'] ?? DateTime.now().toIso8601String(),
       });
     }
@@ -196,12 +318,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     for (final stl in _settlements) {
       synthesized.add({
         'id': 'pay_${stl['id']}',
-        'payment_no': 'PAY-STL-${stl['id'].toString().length > 5 ? stl['id'].toString().substring(stl['id'].toString().length - 5).toUpperCase() : stl['id']}',
+        'payment_no':
+            'PAY-STL-${stl['id'].toString().length > 5 ? stl['id'].toString().substring(stl['id'].toString().length - 5).toUpperCase() : stl['id']}',
         'type': 'settlement',
         'category': 'Daily Cash Settlement',
-        'amount': double.tryParse(stl['cash_collected']?.toString() ?? stl['sold_amount']?.toString() ?? '0') ?? 0.0,
+        'amount':
+            double.tryParse(
+              stl['cash_collected']?.toString() ??
+                  stl['sold_amount']?.toString() ??
+                  '0',
+            ) ??
+            0.0,
         'payment_method': 'cash',
-        'status': (stl['status'] == 'settled' || stl['status'] == 'tally_zero') ? 'completed' : 'pending',
+        'status': (stl['status'] == 'settled' || stl['status'] == 'tally_zero')
+            ? 'completed'
+            : 'pending',
         'payer_name': stl['salesman_name'] ?? 'Salesman Cash Deposit',
         'payer_phone': '',
         'payer_type': 'salesman',
@@ -255,17 +386,26 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       if (res.statusCode == 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Settlement approved and marked settled!'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('✅ Settlement approved and marked settled!'),
+            backgroundColor: Colors.green,
+          ),
         );
         _loadAllData();
       }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Settlement reconciled!'), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text('Settlement reconciled!'),
+          backgroundColor: Colors.green,
+        ),
       );
       setState(() {
-        final item = _settlements.firstWhere((s) => s['id'] == id, orElse: () => {});
+        final item = _settlements.firstWhere(
+          (s) => s['id'] == id,
+          orElse: () => {},
+        );
         if (item.isNotEmpty) {
           item['status'] = 'settled';
           item['difference'] = 0;
@@ -287,14 +427,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     } catch (_) {
       setState(() {
         _workforce.clear();
-        _workforce.add({'id': 'u1', 'name': 'Super Admin', 'email': 'admin@erp.com', 'phone': '', 'role': 'super_admin', 'status': 'approved'});
+        _workforce.add({
+          'id': 'u1',
+          'name': 'Super Admin',
+          'email': 'admin@erp.com',
+          'phone': '',
+          'role': 'super_admin',
+          'status': 'approved',
+        });
       });
     }
   }
 
   Future<void> _loadPermissions() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/permissions'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/permissions'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -306,16 +455,56 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       setState(() {
         _permissions.clear();
         _permissions.addAll([
-          {'role': 'store_admin', 'permission_key': 'add_stock', 'is_allowed': true},
-          {'role': 'store_admin', 'permission_key': 'transfer_fsm', 'is_allowed': true},
-          {'role': 'store_admin', 'permission_key': 'direct_sale', 'is_allowed': true},
-          {'role': 'store_admin', 'permission_key': 'bulk_sale_distributor', 'is_allowed': true},
-          {'role': 'field_sales_manager', 'permission_key': 'receive_stock', 'is_allowed': true},
-          {'role': 'field_sales_manager', 'permission_key': 'transfer_salesman', 'is_allowed': true},
-          {'role': 'field_sales_manager', 'permission_key': 'direct_sale', 'is_allowed': true},
-          {'role': 'salesman', 'permission_key': 'view_assigned_stock', 'is_allowed': true},
-          {'role': 'salesman', 'permission_key': 'sell_to_customer', 'is_allowed': true},
-          {'role': 'salesman', 'permission_key': 'onboard_customer', 'is_allowed': true},
+          {
+            'role': 'store_admin',
+            'permission_key': 'add_stock',
+            'is_allowed': true,
+          },
+          {
+            'role': 'store_admin',
+            'permission_key': 'transfer_fsm',
+            'is_allowed': true,
+          },
+          {
+            'role': 'store_admin',
+            'permission_key': 'direct_sale',
+            'is_allowed': true,
+          },
+          {
+            'role': 'store_admin',
+            'permission_key': 'bulk_sale_distributor',
+            'is_allowed': true,
+          },
+          {
+            'role': 'field_sales_manager',
+            'permission_key': 'receive_stock',
+            'is_allowed': true,
+          },
+          {
+            'role': 'field_sales_manager',
+            'permission_key': 'transfer_salesman',
+            'is_allowed': true,
+          },
+          {
+            'role': 'field_sales_manager',
+            'permission_key': 'direct_sale',
+            'is_allowed': true,
+          },
+          {
+            'role': 'salesman',
+            'permission_key': 'view_assigned_stock',
+            'is_allowed': true,
+          },
+          {
+            'role': 'salesman',
+            'permission_key': 'sell_to_customer',
+            'is_allowed': true,
+          },
+          {
+            'role': 'salesman',
+            'permission_key': 'onboard_customer',
+            'is_allowed': true,
+          },
         ]);
       });
     }
@@ -340,7 +529,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadPrices() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products/prices'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/products/prices'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -357,7 +548,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadWarehouses() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/warehouses'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/warehouses'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -374,7 +567,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadGlobalStocks() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/global'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/stock/global'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -391,7 +586,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadTransfers() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/transfers'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/stock/transfers'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -408,7 +605,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadAlerts() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/alerts'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/stock/alerts'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -425,7 +624,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadReferralRules() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/referrals/rules'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/referrals/rules'),
+      );
       if (res.statusCode == 200) {
         setState(() => _referralRules = jsonDecode(res.body));
       }
@@ -434,7 +635,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadReferralTree() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/referrals/tree'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/referrals/tree'),
+      );
       if (res.statusCode == 200) {
         setState(() => _referralTreeData = jsonDecode(res.body));
       }
@@ -461,7 +664,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Future<void> _loadAuditLogs() async {
     try {
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/audit-logs'));
+      final res = await http.get(
+        Uri.parse('${AppState.apiBaseUrl}/audit-logs'),
+      );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as List;
         setState(() {
@@ -478,7 +683,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   // --- ACTIONS & DIALOGS ---
 
-  Future<void> _togglePermission(String role, String permissionKey, bool currentAllowed) async {
+  Future<void> _togglePermission(
+    String role,
+    String permissionKey,
+    bool currentAllowed,
+  ) async {
     final nextAllowed = !currentAllowed;
     try {
       await http.put(
@@ -489,18 +698,25 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           'permission_key': permissionKey,
           'is_allowed': nextAllowed,
           'admin_id': AppState.currentUser?['id'],
-          'admin_name': AppState.currentUser?['name']
+          'admin_name': AppState.currentUser?['name'],
         }),
       );
       _loadPermissions();
       _loadAuditLogs();
     } catch (_) {
       setState(() {
-        final item = _permissions.firstWhere((p) => p['role'] == role && p['permission_key'] == permissionKey, orElse: () => <String, dynamic>{});
+        final item = _permissions.firstWhere(
+          (p) => p['role'] == role && p['permission_key'] == permissionKey,
+          orElse: () => <String, dynamic>{},
+        );
         if (item.isNotEmpty) {
           item['is_allowed'] = nextAllowed;
         } else {
-          _permissions.add({'role': role, 'permission_key': permissionKey, 'is_allowed': nextAllowed});
+          _permissions.add({
+            'role': role,
+            'permission_key': permissionKey,
+            'is_allowed': nextAllowed,
+          });
         }
       });
     }
@@ -510,9 +726,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final nameCtrl = TextEditingController(text: editProduct?['name'] ?? '');
     final skuCtrl = TextEditingController(text: editProduct?['sku'] ?? '');
     final unitCtrl = TextEditingController(text: editProduct?['unit'] ?? 'pcs');
-    final catCtrl = TextEditingController(text: editProduct?['category'] ?? 'General');
-    final basePriceCtrl = TextEditingController(text: editProduct?['base_price']?.toString() ?? '0');
-    final alertCtrl = TextEditingController(text: editProduct?['min_stock_alert']?.toString() ?? '20');
+    final catCtrl = TextEditingController(
+      text: editProduct?['category'] ?? 'General',
+    );
+    final basePriceCtrl = TextEditingController(
+      text: editProduct?['base_price']?.toString() ?? '0',
+    );
+    final alertCtrl = TextEditingController(
+      text: editProduct?['min_stock_alert']?.toString() ?? '20',
+    );
     bool isAvailable = editProduct?['is_active'] != false;
 
     showDialog(
@@ -525,19 +747,58 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Product Name *')),
-                TextField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU Code *')),
-                TextField(controller: catCtrl, decoration: const InputDecoration(labelText: 'Category')),
-                TextField(controller: unitCtrl, decoration: const InputDecoration(labelText: 'Selling Unit (pcs, packet, etc.)')),
-                TextField(controller: basePriceCtrl, decoration: const InputDecoration(labelText: 'Base Selling Price (₹)'), keyboardType: const TextInputType.numberWithOptions(decimal: true)),
-                TextField(controller: alertCtrl, decoration: const InputDecoration(labelText: 'Low Stock Alert Threshold'), keyboardType: TextInputType.number),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Product Name *',
+                  ),
+                ),
+                TextField(
+                  controller: skuCtrl,
+                  decoration: const InputDecoration(labelText: 'SKU Code *'),
+                ),
+                TextField(
+                  controller: catCtrl,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                ),
+                TextField(
+                  controller: unitCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Selling Unit (pcs, packet, etc.)',
+                  ),
+                ),
+                TextField(
+                  controller: basePriceCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Base Selling Price (₹)',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                ),
+                TextField(
+                  controller: alertCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Low Stock Alert Threshold',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
-                    color: isAvailable ? Colors.green.shade50 : Colors.red.shade50,
+                    color: isAvailable
+                        ? Colors.green.shade50
+                        : Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isAvailable ? Colors.green.shade300 : Colors.red.shade300),
+                    border: Border.all(
+                      color: isAvailable
+                          ? Colors.green.shade300
+                          : Colors.red.shade300,
+                    ),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -548,9 +809,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           Row(
                             children: [
                               Icon(
-                                isAvailable ? Icons.check_circle : Icons.do_not_disturb_on,
+                                isAvailable
+                                    ? Icons.check_circle
+                                    : Icons.do_not_disturb_on,
                                 size: 16,
-                                color: isAvailable ? Colors.green.shade800 : Colors.red.shade800,
+                                color: isAvailable
+                                    ? Colors.green.shade800
+                                    : Colors.red.shade800,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -558,15 +823,24 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: isAvailable ? Colors.green.shade800 : Colors.red.shade800,
+                                  color: isAvailable
+                                      ? Colors.green.shade800
+                                      : Colors.red.shade800,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            isAvailable ? 'Item is active in sales catalog' : 'Item is inactive / hidden from sales',
-                            style: TextStyle(fontSize: 10.5, color: isAvailable ? Colors.green.shade700 : Colors.red.shade700),
+                            isAvailable
+                                ? 'Item is active in sales catalog'
+                                : 'Item is inactive / hidden from sales',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              color: isAvailable
+                                  ? Colors.green.shade700
+                                  : Colors.red.shade700,
+                            ),
                           ),
                         ],
                       ),
@@ -574,7 +848,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         value: isAvailable,
                         activeThumbColor: Colors.green,
                         inactiveThumbColor: Colors.red,
-                        onChanged: (val) => setDlgState(() => isAvailable = val),
+                        onChanged: (val) =>
+                            setDlgState(() => isAvailable = val),
                       ),
                     ],
                   ),
@@ -583,9 +858,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () async {
                 if (nameCtrl.text.isEmpty || skuCtrl.text.isEmpty) return;
 
@@ -604,7 +885,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 try {
                   if (editProduct != null) {
                     await http.put(
-                      Uri.parse('${AppState.apiBaseUrl}/products/${editProduct['id']}'),
+                      Uri.parse(
+                        '${AppState.apiBaseUrl}/products/${editProduct['id']}',
+                      ),
                       headers: {'Content-Type': 'application/json'},
                       body: jsonEncode(bodyData),
                     );
@@ -626,8 +909,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       editProduct['sku'] = skuCtrl.text.trim();
                       editProduct['category'] = catCtrl.text.trim();
                       editProduct['unit'] = unitCtrl.text.trim();
-                      editProduct['base_price'] = double.tryParse(basePriceCtrl.text) ?? 0.0;
-                      editProduct['min_stock_alert'] = int.tryParse(alertCtrl.text) ?? 20;
+                      editProduct['base_price'] =
+                          double.tryParse(basePriceCtrl.text) ?? 0.0;
+                      editProduct['min_stock_alert'] =
+                          int.tryParse(alertCtrl.text) ?? 20;
                       editProduct['is_active'] = isAvailable;
                     } else {
                       _products.add({
@@ -636,7 +921,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         'sku': skuCtrl.text.trim(),
                         'category': catCtrl.text.trim(),
                         'unit': unitCtrl.text.trim(),
-                        'base_price': double.tryParse(basePriceCtrl.text) ?? 0.0,
+                        'base_price':
+                            double.tryParse(basePriceCtrl.text) ?? 0.0,
                         'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
                         'is_active': isAvailable,
                       });
@@ -645,7 +931,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   if (ctx.mounted) Navigator.pop(ctx);
                 }
               },
-              child: Text(editProduct != null ? 'Save Changes' : 'Create Product'),
+              child: Text(
+                editProduct != null ? 'Save Changes' : 'Create Product',
+              ),
             ),
           ],
         ),
@@ -653,7 +941,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     );
   }
 
-  Future<void> _toggleProductAvailability(Map<String, dynamic> p, bool nextStatus) async {
+  Future<void> _toggleProductAvailability(
+    Map<String, dynamic> p,
+    bool nextStatus,
+  ) async {
     setState(() {
       p['is_active'] = nextStatus;
     });
@@ -672,8 +963,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       if (res.statusCode == 200 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(nextStatus ? '🟢 "${p['name']}" is now AVAILABLE' : '🔴 "${p['name']}" is now NOT AVAILABLE'),
-            backgroundColor: nextStatus ? Colors.green.shade700 : Colors.red.shade700,
+            content: Text(
+              nextStatus
+                  ? '🟢 "${p['name']}" is now AVAILABLE'
+                  : '🔴 "${p['name']}" is now NOT AVAILABLE',
+            ),
+            backgroundColor: nextStatus
+                ? Colors.green.shade700
+                : Colors.red.shade700,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -701,7 +998,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Text(
                 'SKU: ${p['sku']} • Unit: ${p['unit']}\nThis will remove the product and its pricing tiers from the catalog.',
                 style: TextStyle(fontSize: 12, color: Colors.red.shade900),
@@ -710,9 +1010,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete Permanently'),
           ),
@@ -723,11 +1029,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     if (confirmed == true) {
       try {
         final res = await http.delete(
-          Uri.parse('${AppState.apiBaseUrl}/products/${p['id']}?admin_id=${AppState.currentUser?['id']}&admin_name=${AppState.currentUser?['name']}'),
+          Uri.parse(
+            '${AppState.apiBaseUrl}/products/${p['id']}?admin_id=${AppState.currentUser?['id']}&admin_name=${AppState.currentUser?['name']}',
+          ),
         );
         if (res.statusCode == 200 && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Product "${p['name']}" deleted successfully'), backgroundColor: Colors.red.shade700),
+            SnackBar(
+              content: Text('Product "${p['name']}" deleted successfully'),
+              backgroundColor: Colors.red.shade700,
+            ),
           );
         }
       } catch (_) {}
@@ -769,12 +1080,38 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               DropdownButtonFormField<String>(
                 initialValue: selectedRole,
                 isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Buyer / Tier Role'),
+                decoration: const InputDecoration(
+                  labelText: 'Buyer / Tier Role',
+                ),
                 items: const [
-                  DropdownMenuItem(value: 'store_admin', child: Text('Warehouse Admin (Store Admin)', overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(value: 'field_sales_manager', child: Text('Field Sales Manager', overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(value: 'salesman', child: Text('Salesman (Retail Rate)', overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(value: 'distributor', child: Text('Distributor (Bulk Wholesale Rate)', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                    value: 'store_admin',
+                    child: Text(
+                      'Warehouse Admin (Store Admin)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'field_sales_manager',
+                    child: Text(
+                      'Field Sales Manager',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'salesman',
+                    child: Text(
+                      'Salesman (Retail Rate)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
+                    value: 'distributor',
+                    child: Text(
+                      'Distributor (Bulk Wholesale Rate)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
                 onChanged: (v) {
                   if (v != null) {
@@ -788,21 +1125,37 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               const SizedBox(height: 12),
               TextField(
                 controller: priceCtrl,
-                decoration: const InputDecoration(labelText: 'Selling Price (₹)', prefixText: '₹'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Selling Price (₹)',
+                  prefixText: '₹',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: discountCtrl,
-                decoration: const InputDecoration(labelText: 'Promotional Discount (%)', suffixText: '%'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Promotional Discount (%)',
+                  suffixText: '%',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () async {
                 final priceVal = double.tryParse(priceCtrl.text);
                 final discountVal = double.tryParse(discountCtrl.text) ?? 0.0;
@@ -818,7 +1171,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       'price': priceVal,
                       'discount_percentage': discountVal,
                       'admin_id': AppState.currentUser?['id'],
-                      'admin_name': AppState.currentUser?['name']
+                      'admin_name': AppState.currentUser?['name'],
                     }),
                   );
                   _loadPrices();
@@ -826,7 +1179,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (_) {
                   setState(() {
-                    _prices.removeWhere((p) => p['product_id'] == product['id'] && p['role'] == selectedRole);
+                    _prices.removeWhere(
+                      (p) =>
+                          p['product_id'] == product['id'] &&
+                          p['role'] == selectedRole,
+                    );
                     _prices.add({
                       'product_id': product['id'],
                       'role': selectedRole,
@@ -846,10 +1203,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   }
 
   void _showReferralConfigDialog() {
-    final rateCtrl = TextEditingController(text: (_referralRules['commission_per_bottle'] ?? _referralRules['bonus_value'] ?? 1.0).toString());
-    final quotaCtrl = TextEditingController(text: (_referralRules['min_sales_quota'] ?? _referralRules['min_purchase_amount'] ?? 5).toString());
+    final rateCtrl = TextEditingController(
+      text:
+          (_referralRules['commission_per_bottle'] ??
+                  _referralRules['bonus_value'] ??
+                  1.0)
+              .toString(),
+    );
+    final quotaCtrl = TextEditingController(
+      text:
+          (_referralRules['min_sales_quota'] ??
+                  _referralRules['min_purchase_amount'] ??
+                  5)
+              .toString(),
+    );
     bool isActive = _referralRules['is_active'] ?? true;
-    bool isQuotaConditionActive = _referralRules['is_quota_condition_active'] ?? true;
+    bool isQuotaConditionActive =
+        _referralRules['is_quota_condition_active'] ?? true;
 
     showDialog(
       context: context,
@@ -875,15 +1245,25 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: const Color(0xFFFBF4ED), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFBF4ED),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: const Row(
                     children: [
-                      Icon(Icons.info_outline, size: 18, color: AppColors.primary),
+                      Icon(
+                        Icons.info_outline,
+                        size: 18,
+                        color: AppColors.primary,
+                      ),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Applicable strictly to Store Admin, FSM & Salesmen. Customers have NO referral policy.',
-                          style: TextStyle(fontSize: 11, color: AppColors.textPrimary),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                       ),
                     ],
@@ -892,8 +1272,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 const SizedBox(height: 12),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Program Active', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: const Text('Enable or pause downline bottle commissions', style: TextStyle(fontSize: 12)),
+                  title: const Text(
+                    'Program Active',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    'Enable or pause downline bottle commissions',
+                    style: TextStyle(fontSize: 12),
+                  ),
                   value: isActive,
                   activeThumbColor: AppColors.accent,
                   onChanged: (v) => setDialogState(() => isActive = v),
@@ -907,18 +1293,28 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     hintText: 'e.g. 1.00',
                     prefixText: '₹ ',
                     border: OutlineInputBorder(),
-                    helperText: 'Referrer earns this amount per bottle sold by their referral',
+                    helperText:
+                        'Referrer earns this amount per bottle sold by their referral',
                   ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Enforce Minimum Sales Quota', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: const Text('Referrer must sell minimum bottles to qualify for downline commission', style: TextStyle(fontSize: 12)),
+                  title: const Text(
+                    'Enforce Minimum Sales Quota',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    'Referrer must sell minimum bottles to qualify for downline commission',
+                    style: TextStyle(fontSize: 12),
+                  ),
                   value: isQuotaConditionActive,
                   activeThumbColor: AppColors.accent,
-                  onChanged: (v) => setDialogState(() => isQuotaConditionActive = v),
+                  onChanged: (v) =>
+                      setDialogState(() => isQuotaConditionActive = v),
                 ),
                 if (isQuotaConditionActive) ...[
                   const SizedBox(height: 8),
@@ -929,7 +1325,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       hintText: 'e.g. 5',
                       suffixText: 'bottles',
                       border: OutlineInputBorder(),
-                      helperText: 'If personal sales < quota, downline commission is held as Quota Pending',
+                      helperText:
+                          'If personal sales < quota, downline commission is held as Quota Pending',
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -938,9 +1335,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () async {
                 final rateVal = double.tryParse(rateCtrl.text) ?? 1.0;
                 final quotaVal = int.tryParse(quotaCtrl.text) ?? 5;
@@ -985,29 +1388,40 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'admin_id': AppState.currentUser?['id'],
-          'admin_name': AppState.currentUser?['name']
+          'admin_name': AppState.currentUser?['name'],
         }),
       );
       _loadReferrals();
       _loadAuditLogs();
       _loadSummary();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Referral payout processed!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Referral payout processed!')),
+        );
       }
     } catch (_) {
       setState(() {
-        final r = _referrals.firstWhere((x) => x['id'] == id, orElse: () => <String, dynamic>{});
+        final r = _referrals.firstWhere(
+          (x) => x['id'] == id,
+          orElse: () => <String, dynamic>{},
+        );
         if (r.isNotEmpty) r['status'] = 'paid';
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payout recorded locally!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payout recorded locally!')),
+        );
       }
     }
   }
 
   void _showAddWarehouseDialog([Map<String, dynamic>? editWarehouse]) {
-    final nameCtrl = TextEditingController(text: editWarehouse?['name']?.toString() ?? '');
-    final locCtrl = TextEditingController(text: editWarehouse?['location']?.toString() ?? '');
+    final nameCtrl = TextEditingController(
+      text: editWarehouse?['name']?.toString() ?? '',
+    );
+    final locCtrl = TextEditingController(
+      text: editWarehouse?['location']?.toString() ?? '',
+    );
     final isEdit = editWarehouse != null;
 
     showDialog(
@@ -1016,9 +1430,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(isEdit ? Icons.edit_outlined : Icons.warehouse_outlined, color: AppColors.primary),
+            Icon(
+              isEdit ? Icons.edit_outlined : Icons.warehouse_outlined,
+              color: AppColors.primary,
+            ),
             const SizedBox(width: 8),
-            Text(isEdit ? 'Edit Warehouse' : 'Register Warehouse', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text(
+              isEdit ? 'Edit Warehouse' : 'Register Warehouse',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
           ],
         ),
         content: Column(
@@ -1030,7 +1450,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 labelText: 'Warehouse Name',
                 hintText: 'e.g. South Central Hub',
                 prefixIcon: const Icon(Icons.business_outlined),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -1040,15 +1462,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 labelText: 'Location / City',
                 hintText: 'e.g. Pune, Maharashtra',
                 prefixIcon: const Icon(Icons.location_on_outlined),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () async {
               final name = nameCtrl.text.trim();
               final location = locCtrl.text.trim();
@@ -1074,7 +1504,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(isEdit ? 'Warehouse updated successfully!' : 'Warehouse registered successfully!'),
+                      content: Text(
+                        isEdit
+                            ? 'Warehouse updated successfully!'
+                            : 'Warehouse registered successfully!',
+                      ),
                       backgroundColor: Colors.green,
                     ),
                   );
@@ -1082,18 +1516,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               } catch (_) {
                 if (isEdit) {
                   setState(() {
-                    final idx = _warehouses.indexWhere((w) => w['id'] == editWarehouse['id']);
+                    final idx = _warehouses.indexWhere(
+                      (w) => w['id'] == editWarehouse['id'],
+                    );
                     if (idx != -1) {
                       _warehouses[idx]['name'] = name;
                       _warehouses[idx]['location'] = location;
                     }
                   });
                 } else {
-                  setState(() => _warehouses.add({
-                    'id': 'w_${DateTime.now().millisecondsSinceEpoch}',
-                    'name': name,
-                    'location': location,
-                  }));
+                  setState(
+                    () => _warehouses.add({
+                      'id': 'w_${DateTime.now().millisecondsSinceEpoch}',
+                      'name': name,
+                      'location': location,
+                    }),
+                  );
                 }
                 if (ctx.mounted) Navigator.pop(ctx);
               }
@@ -1112,8 +1550,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
     final stockCount = _globalStocks
         .where((s) => s['warehouse_id']?.toString() == whId)
-        .fold<int>(0, (sum, item) => sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0));
-    final staffCount = _workforce.where((u) => u['warehouse_id']?.toString() == whId).length;
+        .fold<int>(
+          0,
+          (sum, item) =>
+              sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0),
+        );
+    final staffCount = _workforce
+        .where((u) => u['warehouse_id']?.toString() == whId)
+        .length;
 
     showDialog(
       context: context,
@@ -1123,14 +1567,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           children: [
             Icon(Icons.delete_forever, color: Colors.red.shade700, size: 26),
             const SizedBox(width: 8),
-            const Text('Delete Warehouse', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            const Text(
+              'Delete Warehouse',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Are you sure you want to permanently delete "$whName"?', style: const TextStyle(fontSize: 14)),
+            Text(
+              'Are you sure you want to permanently delete "$whName"?',
+              style: const TextStyle(fontSize: 14),
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -1142,34 +1592,71 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Location: $whLoc', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red.shade900)),
+                  Text(
+                    'Location: $whLoc',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('Current Inventory: $stockCount units', style: TextStyle(fontSize: 12, color: Colors.red.shade800)),
-                  Text('Assigned Personnel: $staffCount staff members', style: TextStyle(fontSize: 12, color: Colors.red.shade800)),
+                  Text(
+                    'Current Inventory: $stockCount units',
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade800),
+                  ),
+                  Text(
+                    'Assigned Personnel: $staffCount staff members',
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade800),
+                  ),
                   const SizedBox(height: 6),
-                  const Text('Deleting will unlink staff and purge stock associated with this hub.', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.red)),
+                  const Text(
+                    'Deleting will unlink staff and purge stock associated with this hub.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.red,
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () async {
               Navigator.pop(ctx);
               final prevList = List<Map<String, dynamic>>.from(_warehouses);
-              setState(() => _warehouses.removeWhere((item) => item['id']?.toString() == whId));
+              setState(
+                () => _warehouses.removeWhere(
+                  (item) => item['id']?.toString() == whId,
+                ),
+              );
               try {
-                final res = await http.delete(Uri.parse('${AppState.apiBaseUrl}/warehouses/$whId'));
+                final res = await http.delete(
+                  Uri.parse('${AppState.apiBaseUrl}/warehouses/$whId'),
+                );
                 if (res.statusCode == 200) {
                   _loadWarehouses();
                   _loadGlobalStocks();
                   _loadWorkforce();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Warehouse "$whName" deleted successfully!'), backgroundColor: Colors.red.shade700),
+                      SnackBar(
+                        content: Text(
+                          'Warehouse "$whName" deleted successfully!',
+                        ),
+                        backgroundColor: Colors.red.shade700,
+                      ),
                     );
                   }
                 } else {
@@ -1179,7 +1666,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   });
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to delete warehouse on server.')),
+                      const SnackBar(
+                        content: Text('Failed to delete warehouse on server.'),
+                      ),
                     );
                   }
                 }
@@ -1197,18 +1686,48 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   // --- BUILD VIEWS ---
 
   Widget _buildHubView() {
-    final totalStock = (_summary['totalStock'] as num?)?.toInt() ??
-        _globalStocks.fold<int>(0, (sum, item) => sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0));
+    final totalStock =
+        (_summary['totalStock'] as num?)?.toInt() ??
+        _globalStocks.fold<int>(
+          0,
+          (sum, item) =>
+              sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0),
+        );
 
-    final todaySalesAmount = (_summary['todaySalesAmount'] as num?)?.toDouble() ?? 0.0;
-    final todaySalesBottles = (_summary['todaySalesBottles'] as num?)?.toInt() ?? 0;
+    final todaySalesAmount =
+        (_summary['todaySalesAmount'] as num?)?.toDouble() ?? 0.0;
+    final todaySalesBottles =
+        (_summary['todaySalesBottles'] as num?)?.toInt() ?? 0;
     final todaySalesCount = (_summary['todaySalesCount'] as num?)?.toInt() ?? 0;
 
-    final pendingSettlementCount = (_summary['pendingSettlementCount'] as num?)?.toInt() ??
-        _settlements.where((s) => (s['status'] != 'settled' && s['status'] != 'reconciled') || (double.tryParse(s['difference']?.toString() ?? '0') ?? 0).abs() > 0.01).length;
-    final pendingSettlementAmount = (_summary['pendingSettlementAmount'] as num?)?.toDouble() ??
-        _settlements.where((s) => (s['status'] != 'settled' && s['status'] != 'reconciled') || (double.tryParse(s['difference']?.toString() ?? '0') ?? 0).abs() > 0.01)
-            .fold<double>(0.0, (sum, s) => sum + (double.tryParse(s['difference']?.toString() ?? '0') ?? 0.0).abs());
+    final pendingSettlementCount =
+        (_summary['pendingSettlementCount'] as num?)?.toInt() ??
+        _settlements
+            .where(
+              (s) =>
+                  (s['status'] != 'settled' && s['status'] != 'reconciled') ||
+                  (double.tryParse(s['difference']?.toString() ?? '0') ?? 0)
+                          .abs() >
+                      0.01,
+            )
+            .length;
+    final pendingSettlementAmount =
+        (_summary['pendingSettlementAmount'] as num?)?.toDouble() ??
+        _settlements
+            .where(
+              (s) =>
+                  (s['status'] != 'settled' && s['status'] != 'reconciled') ||
+                  (double.tryParse(s['difference']?.toString() ?? '0') ?? 0)
+                          .abs() >
+                      0.01,
+            )
+            .fold<double>(
+              0.0,
+              (sum, s) =>
+                  sum +
+                  (double.tryParse(s['difference']?.toString() ?? '0') ?? 0.0)
+                      .abs(),
+            );
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -1219,13 +1738,32 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           if (_alerts.isNotEmpty)
             Card(
               color: Colors.red.shade50,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.red.shade200)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.red.shade200),
+              ),
               margin: const EdgeInsets.only(bottom: 16),
               child: ListTile(
-                leading: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 32),
-                title: Text('${_alerts.length} Low-Stock Alert(s) Detected!', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                subtitle: Text('Items below safety threshold: ${_alerts.map((a) => a['product']?['name']).join(", ")}'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.red),
+                leading: const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.red,
+                  size: 32,
+                ),
+                title: Text(
+                  '${_alerts.length} Low-Stock Alert(s) Detected!',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red,
+                  ),
+                ),
+                subtitle: Text(
+                  'Items below safety threshold: ${_alerts.map((a) => a['product']?['name']).join(", ")}',
+                ),
+                trailing: const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.red,
+                ),
                 onTap: () => setState(() {
                   _activeModule = 5;
                   _inventorySubTab = 2; // jump to alerts
@@ -1233,28 +1771,58 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               ),
             ),
 
+          // Offline Sync Banner (if any unsynced actions exist)
+          _buildOfflineSyncBanner(),
+
           // Primary KPI Banner
           Card(
             color: AppColors.primary,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  const Text('Total System Revenue', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  const Text(
+                    'Total System Revenue',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     '₹${_summary['totalRevenue'] ?? _sales.fold<double>(0, (sum, i) => sum + (double.tryParse(i['amount'].toString()) ?? 0))}',
-                    style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      Expanded(child: _kpiMiniCol('Active Workforce', '${_workforce.length} staff', () => setState(() => _activeModule = 1))),
-                      Expanded(child: _kpiMiniCol('Warehouses', '${_warehouses.length} hubs', () => setState(() => _activeModule = 9))),
-                      Expanded(child: _kpiMiniCol('Products', '${_products.length} SKUs', () => setState(() => _activeModule = 3))),
+                      Expanded(
+                        child: _kpiMiniCol(
+                          'Active Workforce',
+                          '${_workforce.length} staff',
+                          () => setState(() => _activeModule = 1),
+                        ),
+                      ),
+                      Expanded(
+                        child: _kpiMiniCol(
+                          'Warehouses',
+                          '${_warehouses.length} hubs',
+                          () => setState(() => _activeModule = 9),
+                        ),
+                      ),
+                      Expanded(
+                        child: _kpiMiniCol(
+                          'Products',
+                          '${_products.length} SKUs',
+                          () => setState(() => _activeModule = 3),
+                        ),
+                      ),
                     ],
-                  )
+                  ),
                 ],
               ),
             ),
@@ -1265,7 +1833,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Daily Operational Pulse', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              const Text(
+                'Daily Operational Pulse',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -1275,9 +1850,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle)),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.green,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                     const SizedBox(width: 5),
-                    const Text('LIVE', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11)),
+                    const Text(
+                      'LIVE',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1312,7 +1901,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 iconBg: Colors.orange.shade50,
                 title: 'SETTLEMENT',
                 value: '$pendingSettlementCount Pending',
-                subtitle: pendingSettlementAmount > 0 ? '₹${pendingSettlementAmount.toStringAsFixed(0)} diff' : 'Reconciled',
+                subtitle: pendingSettlementAmount > 0
+                    ? '₹${pendingSettlementAmount.toStringAsFixed(0)} diff'
+                    : 'Reconciled',
                 onTap: () => setState(() => _activeModule = 8),
               ),
             ],
@@ -1320,7 +1911,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           const SizedBox(height: 24),
 
           // Executive Module Operations Grid
-          const Text('Super Admin Operations', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+          const Text(
+            'Super Admin Operations',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 12),
           GridView.count(
             crossAxisCount: 2,
@@ -1330,16 +1928,66 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             mainAxisSpacing: 12,
             childAspectRatio: 1.08,
             children: [
-              _moduleCard(Icons.group_outlined, 'Workforce & Users', '${_workforce.length} Accounts', () => setState(() => _activeModule = 1)),
-              _moduleCard(Icons.security_outlined, 'Role Permissions', 'Dynamic RBAC Matrix', () => setState(() => _activeModule = 2)),
-              _moduleCard(Icons.inventory_2_outlined, 'Catalog & Pricing', '${_products.length} Products & Tiers', () => setState(() => _activeModule = 3)),
-              _moduleCard(Icons.account_tree_outlined, 'Workforce Referrals', '${_referrals.where((r) => r['status'] == 'unlocked' || r['status'] == 'pending').length} Pending Payouts', () => setState(() => _activeModule = 4)),
-              _moduleCard(Icons.swap_horiz_outlined, 'Stock & Movement', '$totalStock Total Units', () => setState(() => _activeModule = 5)),
-              _moduleCard(Icons.point_of_sale_outlined, 'Sales Oversight', '₹${todaySalesAmount.toStringAsFixed(0)} Today', () => setState(() => _activeModule = 6)),
-              _moduleCard(Icons.assignment_turned_in_outlined, 'Daily Settlements', '$pendingSettlementCount Pending Review', () => setState(() => _activeModule = 8)),
-              _moduleCard(Icons.receipt_long_outlined, 'Payments History', '₹${(double.tryParse(_paymentsSummary['total_collected']?.toString() ?? '0') ?? todaySalesAmount).toStringAsFixed(0)} Inflow', () => setState(() => _activeModule = 10)),
-              _moduleCard(Icons.warehouse_outlined, 'Warehouses', '${_warehouses.length} Active Hubs', () => setState(() => _activeModule = 9)),
-              _moduleCard(Icons.history_edu_outlined, 'Audit Trail', '${_auditLogs.length} Events Logged', () => setState(() => _activeModule = 7)),
+              _moduleCard(
+                Icons.group_outlined,
+                'Workforce & Users',
+                '${_workforce.length} Accounts',
+                () => setState(() => _activeModule = 1),
+              ),
+              _moduleCard(
+                Icons.security_outlined,
+                'Role Permissions',
+                'Dynamic RBAC Matrix',
+                () => setState(() => _activeModule = 2),
+              ),
+              _moduleCard(
+                Icons.inventory_2_outlined,
+                'Catalog & Pricing',
+                '${_products.length} Products & Tiers',
+                () => setState(() => _activeModule = 3),
+              ),
+              _moduleCard(
+                Icons.account_tree_outlined,
+                'Workforce Referrals',
+                '${_referrals.where((r) => r['status'] == 'unlocked' || r['status'] == 'pending').length} Pending Payouts',
+                () => setState(() => _activeModule = 4),
+              ),
+              _moduleCard(
+                Icons.swap_horiz_outlined,
+                'Stock & Movement',
+                '$totalStock Total Units',
+                () => setState(() => _activeModule = 5),
+              ),
+              _moduleCard(
+                Icons.point_of_sale_outlined,
+                'Sales Oversight',
+                '₹${todaySalesAmount.toStringAsFixed(0)} Today',
+                () => setState(() => _activeModule = 6),
+              ),
+              _moduleCard(
+                Icons.assignment_turned_in_outlined,
+                'Daily Settlements',
+                '$pendingSettlementCount Pending Review',
+                () => setState(() => _activeModule = 8),
+              ),
+              _moduleCard(
+                Icons.receipt_long_outlined,
+                'Payments History',
+                '₹${(double.tryParse(_paymentsSummary['total_collected']?.toString() ?? '0') ?? todaySalesAmount).toStringAsFixed(0)} Inflow',
+                () => setState(() => _activeModule = 10),
+              ),
+              _moduleCard(
+                Icons.warehouse_outlined,
+                'Warehouses',
+                '${_warehouses.length} Active Hubs',
+                () => setState(() => _activeModule = 9),
+              ),
+              _moduleCard(
+                Icons.history_edu_outlined,
+                'Audit Trail',
+                '${_auditLogs.length} Events Logged',
+                () => setState(() => _activeModule = 7),
+              ),
             ],
           ),
         ],
@@ -1380,7 +2028,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 const SizedBox(height: 10),
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: AppColors.textSecondary, letterSpacing: 0.3),
+                  style: const TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textSecondary,
+                    letterSpacing: 0.3,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1390,13 +2043,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     value,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 9.5, color: AppColors.textSecondary.withValues(alpha: 0.8)),
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    color: AppColors.textSecondary.withValues(alpha: 0.8),
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1414,12 +2074,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       children: [
         FittedBox(
           fit: BoxFit.scaleDown,
-          child: Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
         ),
         const SizedBox(height: 2),
         FittedBox(
           fit: BoxFit.scaleDown,
-          child: Text(label, style: const TextStyle(color: Colors.white60, fontSize: 11)),
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white60, fontSize: 11),
+          ),
         ),
       ],
     );
@@ -1436,7 +2106,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     return col;
   }
 
-  Widget _moduleCard(IconData icon, String title, String subtitle, VoidCallback onTap) {
+  Widget _moduleCard(
+    IconData icon,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) {
     return Card(
       color: AppColors.cardBg,
       elevation: 2,
@@ -1458,14 +2133,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               const SizedBox(height: 8),
               Text(
                 title,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 10.5),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 10.5,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1495,48 +2176,82 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       {'key': 'transfer_fsm', 'title': 'Transfer Stock to FSM'},
       {'key': 'transfer_salesman', 'title': 'Transfer Stock to Salesman'},
       {'key': 'direct_sale', 'title': 'Direct Sale to Customer'},
-      {'key': 'bulk_sale_distributor', 'title': 'Bulk Wholesale to Distributor'},
+      {
+        'key': 'bulk_sale_distributor',
+        'title': 'Bulk Wholesale to Distributor',
+      },
       {'key': 'onboard_customer', 'title': 'Onboard New Customer'},
     ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Role & Permission Matrix'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('Dynamic Access Control (RBAC)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.textPrimary)),
+          const Text(
+            'Dynamic Access Control (RBAC)',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              color: AppColors.textPrimary,
+            ),
+          ),
           const SizedBox(height: 6),
-          const Text('Toggle capabilities per role in real-time. Changes are logged to the audit trail immediately.', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+          const Text(
+            'Toggle capabilities per role in real-time. Changes are logged to the audit trail immediately.',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          ),
           const SizedBox(height: 20),
           for (final r in roles) ...[
             Card(
               color: AppColors.cardBg,
               margin: const EdgeInsets.only(bottom: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: ExpansionTile(
                 initiallyExpanded: true,
-                title: Text(r.replaceAll('_', ' ').toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary)),
+                title: Text(
+                  r.replaceAll('_', ' ').toUpperCase(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                  ),
+                ),
                 subtitle: const Text('Tap to configure capabilities'),
                 children: [
                   const Divider(height: 1),
                   for (final cap in capabilities) ...[
                     SwitchListTile(
                       title: Text(cap['title']!),
-                      value: _permissions.any((p) => p['role'] == r && p['permission_key'] == cap['key'] && p['is_allowed'] == true),
+                      value: _permissions.any(
+                        (p) =>
+                            p['role'] == r &&
+                            p['permission_key'] == cap['key'] &&
+                            p['is_allowed'] == true,
+                      ),
                       activeThumbColor: AppColors.accent,
                       onChanged: (_) {
-                        final curr = _permissions.any((p) => p['role'] == r && p['permission_key'] == cap['key'] && p['is_allowed'] == true);
+                        final curr = _permissions.any(
+                          (p) =>
+                              p['role'] == r &&
+                              p['permission_key'] == cap['key'] &&
+                              p['is_allowed'] == true,
+                        );
                         _togglePermission(r, cap['key']!, curr);
                       },
                     ),
-                  ]
+                  ],
                 ],
               ),
             ),
-          ]
+          ],
         ],
       ),
     );
@@ -1544,8 +2259,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   // --- MODULE 3: PRODUCT CATALOG & TIERED PRICING ---
   Widget _buildProductsModule() {
-    final availableCount = _products.where((p) => p['is_active'] != false).length;
-    final notAvailableCount = _products.where((p) => p['is_active'] == false).length;
+    final availableCount = _products
+        .where((p) => p['is_active'] != false)
+        .length;
+    final notAvailableCount = _products
+        .where((p) => p['is_active'] == false)
+        .length;
 
     // Filter products by search and availability
     final filteredProducts = _products.where((p) {
@@ -1554,7 +2273,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       final cat = (p['category'] ?? '').toString().toLowerCase();
       final query = _productSearchQuery.toLowerCase().trim();
 
-      final matchesQuery = query.isEmpty || name.contains(query) || sku.contains(query) || cat.contains(query);
+      final matchesQuery =
+          query.isEmpty ||
+          name.contains(query) ||
+          sku.contains(query) ||
+          cat.contains(query);
       if (!matchesQuery) return false;
 
       final isAvail = p['is_active'] != false;
@@ -1566,7 +2289,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Product Catalog & Pricing'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1602,9 +2328,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         : null,
                     filled: true,
                     fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
                   ),
                   onChanged: (val) => setState(() => _productSearchQuery = val),
                 ),
@@ -1616,42 +2351,68 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       FilterChip(
                         selected: _productAvailabilityFilter == 'all',
                         label: Text('All (${_products.length})'),
-                        selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                        selectedColor: AppColors.primary.withValues(
+                          alpha: 0.15,
+                        ),
                         checkmarkColor: AppColors.primary,
                         labelStyle: TextStyle(
                           fontSize: 12,
-                          fontWeight: _productAvailabilityFilter == 'all' ? FontWeight.bold : FontWeight.normal,
-                          color: _productAvailabilityFilter == 'all' ? AppColors.primary : AppColors.textSecondary,
+                          fontWeight: _productAvailabilityFilter == 'all'
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: _productAvailabilityFilter == 'all'
+                              ? AppColors.primary
+                              : AppColors.textSecondary,
                         ),
-                        onSelected: (_) => setState(() => _productAvailabilityFilter = 'all'),
+                        onSelected: (_) =>
+                            setState(() => _productAvailabilityFilter = 'all'),
                       ),
                       const SizedBox(width: 8),
                       FilterChip(
                         selected: _productAvailabilityFilter == 'available',
-                        avatar: const CircleAvatar(radius: 4, backgroundColor: Colors.green),
+                        avatar: const CircleAvatar(
+                          radius: 4,
+                          backgroundColor: Colors.green,
+                        ),
                         label: Text('Available ($availableCount)'),
                         selectedColor: Colors.green.shade100,
                         checkmarkColor: Colors.green.shade800,
                         labelStyle: TextStyle(
                           fontSize: 12,
-                          fontWeight: _productAvailabilityFilter == 'available' ? FontWeight.bold : FontWeight.normal,
-                          color: _productAvailabilityFilter == 'available' ? Colors.green.shade900 : AppColors.textSecondary,
+                          fontWeight: _productAvailabilityFilter == 'available'
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: _productAvailabilityFilter == 'available'
+                              ? Colors.green.shade900
+                              : AppColors.textSecondary,
                         ),
-                        onSelected: (_) => setState(() => _productAvailabilityFilter = 'available'),
+                        onSelected: (_) => setState(
+                          () => _productAvailabilityFilter = 'available',
+                        ),
                       ),
                       const SizedBox(width: 8),
                       FilterChip(
                         selected: _productAvailabilityFilter == 'not_available',
-                        avatar: const CircleAvatar(radius: 4, backgroundColor: Colors.red),
+                        avatar: const CircleAvatar(
+                          radius: 4,
+                          backgroundColor: Colors.red,
+                        ),
                         label: Text('Not Available ($notAvailableCount)'),
                         selectedColor: Colors.red.shade100,
                         checkmarkColor: Colors.red.shade800,
                         labelStyle: TextStyle(
                           fontSize: 12,
-                          fontWeight: _productAvailabilityFilter == 'not_available' ? FontWeight.bold : FontWeight.normal,
-                          color: _productAvailabilityFilter == 'not_available' ? Colors.red.shade900 : AppColors.textSecondary,
+                          fontWeight:
+                              _productAvailabilityFilter == 'not_available'
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: _productAvailabilityFilter == 'not_available'
+                              ? Colors.red.shade900
+                              : AppColors.textSecondary,
                         ),
-                        onSelected: (_) => setState(() => _productAvailabilityFilter = 'not_available'),
+                        onSelected: (_) => setState(
+                          () => _productAvailabilityFilter = 'not_available',
+                        ),
                       ),
                     ],
                   ),
@@ -1670,22 +2431,33 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.inventory_2_outlined, size: 54, color: Colors.grey.shade400),
+                          Icon(
+                            Icons.inventory_2_outlined,
+                            size: 54,
+                            color: Colors.grey.shade400,
+                          ),
                           const SizedBox(height: 12),
                           Text(
                             _productSearchQuery.isNotEmpty
                                 ? 'No products matching "$_productSearchQuery"'
                                 : (_productAvailabilityFilter == 'not_available'
-                                    ? 'No unavailable products found'
-                                    : 'No products found'),
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.grey.shade700),
+                                      ? 'No unavailable products found'
+                                      : 'No products found'),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: Colors.grey.shade700,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             _productSearchQuery.isNotEmpty
                                 ? 'Try clearing your search keyword'
                                 : 'Add products to your catalog using the button below',
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade500,
+                            ),
                           ),
                         ],
                       ),
@@ -1705,7 +2477,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
-                            color: isAvail ? Colors.transparent : Colors.red.shade200,
+                            color: isAvail
+                                ? Colors.transparent
+                                : Colors.red.shade200,
                             width: isAvail ? 0 : 1.2,
                           ),
                         ),
@@ -1720,14 +2494,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 children: [
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           p['name'] ?? '',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 16,
-                                            color: isAvail ? AppColors.textPrimary : Colors.grey.shade600,
+                                            color: isAvail
+                                                ? AppColors.textPrimary
+                                                : Colors.grey.shade600,
                                           ),
                                         ),
                                         const SizedBox(height: 4),
@@ -1736,29 +2513,66 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                           runSpacing: 4,
                                           children: [
                                             Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 7,
+                                                    vertical: 2,
+                                                  ),
                                               decoration: BoxDecoration(
                                                 color: Colors.brown.shade50,
-                                                borderRadius: BorderRadius.circular(4),
-                                                border: Border.all(color: Colors.brown.shade200),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                                border: Border.all(
+                                                  color: Colors.brown.shade200,
+                                                ),
                                               ),
-                                              child: Text('SKU: ${p['sku']}', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.brown.shade900)),
+                                              child: Text(
+                                                'SKU: ${p['sku']}',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.brown.shade900,
+                                                ),
+                                              ),
                                             ),
                                             Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 7,
+                                                    vertical: 2,
+                                                  ),
                                               decoration: BoxDecoration(
                                                 color: Colors.blueGrey.shade50,
-                                                borderRadius: BorderRadius.circular(4),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                               ),
-                                              child: Text(p['category'] ?? 'General', style: TextStyle(fontSize: 10.5, color: Colors.blueGrey.shade800)),
+                                              child: Text(
+                                                p['category'] ?? 'General',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  color:
+                                                      Colors.blueGrey.shade800,
+                                                ),
+                                              ),
                                             ),
                                             Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 7,
+                                                    vertical: 2,
+                                                  ),
                                               decoration: BoxDecoration(
                                                 color: Colors.orange.shade50,
-                                                borderRadius: BorderRadius.circular(4),
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
                                               ),
-                                              child: Text('Unit: ${p['unit']}', style: TextStyle(fontSize: 10.5, color: Colors.orange.shade900)),
+                                              child: Text(
+                                                'Unit: ${p['unit']}',
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  color: Colors.orange.shade900,
+                                                ),
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -1768,23 +2582,44 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                   const SizedBox(width: 8),
                                   // Status Badge
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: isAvail ? Colors.green.shade50 : Colors.red.shade50,
+                                      color: isAvail
+                                          ? Colors.green.shade50
+                                          : Colors.red.shade50,
                                       borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: isAvail ? Colors.green.shade300 : Colors.red.shade300),
+                                      border: Border.all(
+                                        color: isAvail
+                                            ? Colors.green.shade300
+                                            : Colors.red.shade300,
+                                      ),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(isAvail ? Icons.check_circle : Icons.do_not_disturb_on, size: 12, color: isAvail ? Colors.green.shade800 : Colors.red.shade800),
+                                        Icon(
+                                          isAvail
+                                              ? Icons.check_circle
+                                              : Icons.do_not_disturb_on,
+                                          size: 12,
+                                          color: isAvail
+                                              ? Colors.green.shade800
+                                              : Colors.red.shade800,
+                                        ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          isAvail ? 'AVAILABLE' : 'NOT AVAILABLE',
+                                          isAvail
+                                              ? 'AVAILABLE'
+                                              : 'NOT AVAILABLE',
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.bold,
-                                            color: isAvail ? Colors.green.shade800 : Colors.red.shade800,
+                                            color: isAvail
+                                                ? Colors.green.shade800
+                                                : Colors.red.shade800,
                                           ),
                                         ),
                                       ],
@@ -1799,12 +2634,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 children: [
                                   Text(
                                     'Base Price: ₹${p['base_price']}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppColors.primary),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13.5,
+                                      color: AppColors.primary,
+                                    ),
                                   ),
                                   const Spacer(),
                                   Text(
                                     'Low Stock Alert: < ${p['min_stock_alert'] ?? 20} ${p['unit']}',
-                                    style: TextStyle(color: Colors.amber.shade900, fontSize: 11.5, fontWeight: FontWeight.w500),
+                                    style: TextStyle(
+                                      color: Colors.amber.shade900,
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1812,22 +2655,40 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
                               // Availability Toggle Banner
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: isAvail ? Colors.green.shade50.withValues(alpha: 0.6) : Colors.red.shade50.withValues(alpha: 0.6),
+                                  color: isAvail
+                                      ? Colors.green.shade50.withValues(
+                                          alpha: 0.6,
+                                        )
+                                      : Colors.red.shade50.withValues(
+                                          alpha: 0.6,
+                                        ),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: isAvail ? Colors.green.shade200 : Colors.red.shade200),
+                                  border: Border.all(
+                                    color: isAvail
+                                        ? Colors.green.shade200
+                                        : Colors.red.shade200,
+                                  ),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        isAvail ? 'Product Available for Ordering' : 'Product Marked Not Available',
+                                        isAvail
+                                            ? 'Product Available for Ordering'
+                                            : 'Product Marked Not Available',
                                         style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
-                                          color: isAvail ? Colors.green.shade900 : Colors.red.shade900,
+                                          color: isAvail
+                                              ? Colors.green.shade900
+                                              : Colors.red.shade900,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -1837,7 +2698,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                       children: [
                                         Text(
                                           isAvail ? 'Available' : 'Unavailable',
-                                          style: TextStyle(fontSize: 11, color: isAvail ? Colors.green.shade800 : Colors.red.shade800),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isAvail
+                                                ? Colors.green.shade800
+                                                : Colors.red.shade800,
+                                          ),
                                         ),
                                         Transform.scale(
                                           scale: 0.8,
@@ -1845,7 +2711,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                             value: isAvail,
                                             activeThumbColor: Colors.green,
                                             inactiveThumbColor: Colors.red,
-                                            onChanged: (val) => _toggleProductAvailability(p, val),
+                                            onChanged: (val) =>
+                                                _toggleProductAvailability(
+                                                  p,
+                                                  val,
+                                                ),
                                           ),
                                         ),
                                       ],
@@ -1862,22 +2732,42 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     child: OutlinedButton.icon(
                                       style: OutlinedButton.styleFrom(
                                         foregroundColor: AppColors.accent,
-                                        side: const BorderSide(color: AppColors.accent),
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                        side: const BorderSide(
+                                          color: AppColors.accent,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 8,
+                                        ),
                                       ),
                                       icon: const Icon(Icons.sell, size: 15),
-                                      label: const Text('Set Role & Bulk Prices', style: TextStyle(fontSize: 12)),
-                                      onPressed: () => _showTieredPricingDialog(p),
+                                      label: const Text(
+                                        'Set Role & Bulk Prices',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                      onPressed: () =>
+                                          _showTieredPricingDialog(p),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   IconButton(
-                                    icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
+                                    icon: const Icon(
+                                      Icons.edit,
+                                      size: 20,
+                                      color: Colors.blue,
+                                    ),
                                     tooltip: 'Edit Product Details',
-                                    onPressed: () => _showAddOrEditProductDialog(editProduct: p),
+                                    onPressed: () =>
+                                        _showAddOrEditProductDialog(
+                                          editProduct: p,
+                                        ),
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.red,
+                                    ),
                                     tooltip: 'Delete Product',
                                     onPressed: () => _confirmDeleteProduct(p),
                                   ),
@@ -1896,7 +2786,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         onPressed: () => _showAddOrEditProductDialog(),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
-        label: const Text('Add Product', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        label: const Text(
+          'Add Product',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
@@ -1907,12 +2800,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final quota = _referralRules['min_sales_quota'] ?? 5;
     final isQuotaActive = _referralRules['is_quota_condition_active'] != false;
     final isProgramActive = _referralRules['is_active'] != false;
-    final treeList = (_referralTreeData['tree'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final treeList =
+        (_referralTreeData['tree'] as List?)?.cast<Map<String, dynamic>>() ??
+        [];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Workforce Referrals'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.tune),
@@ -1941,10 +2839,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _referralSubTab == 0 ? AppColors.primary : Colors.grey.shade100,
-                      foregroundColor: _referralSubTab == 0 ? Colors.white : Colors.black87,
+                      backgroundColor: _referralSubTab == 0
+                          ? AppColors.primary
+                          : Colors.grey.shade100,
+                      foregroundColor: _referralSubTab == 0
+                          ? Colors.white
+                          : Colors.black87,
                       elevation: _referralSubTab == 0 ? 2 : 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     onPressed: () => setState(() => _referralSubTab = 0),
                     icon: const Icon(Icons.account_tree_outlined, size: 18),
@@ -1955,10 +2859,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 Expanded(
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _referralSubTab == 1 ? AppColors.primary : Colors.grey.shade100,
-                      foregroundColor: _referralSubTab == 1 ? Colors.white : Colors.black87,
+                      backgroundColor: _referralSubTab == 1
+                          ? AppColors.primary
+                          : Colors.grey.shade100,
+                      foregroundColor: _referralSubTab == 1
+                          ? Colors.white
+                          : Colors.black87,
                       elevation: _referralSubTab == 1 ? 2 : 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     onPressed: () => setState(() => _referralSubTab = 1),
                     icon: const Icon(Icons.receipt_long_outlined, size: 18),
@@ -1979,7 +2889,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   // Super Admin Policy Overview Card
                   Card(
                     color: AppColors.primary,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     elevation: 3,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -1992,12 +2904,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                               const Expanded(
                                 child: Row(
                                   children: [
-                                    Icon(Icons.shield_outlined, color: Colors.white70, size: 16),
+                                    Icon(
+                                      Icons.shield_outlined,
+                                      color: Colors.white70,
+                                      size: 16,
+                                    ),
                                     SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         'WORKFORCE REFERRAL POLICY',
-                                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
+                                        style: TextStyle(
+                                          color: Colors.white70,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                          letterSpacing: 0.5,
+                                        ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
@@ -2006,9 +2927,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                               ),
                               const SizedBox(width: 8),
                               Chip(
-                                label: Text(isProgramActive ? 'ACTIVE' : 'PAUSED'),
-                                backgroundColor: isProgramActive ? Colors.green : Colors.grey,
-                                labelStyle: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                label: Text(
+                                  isProgramActive ? 'ACTIVE' : 'PAUSED',
+                                ),
+                                backgroundColor: isProgramActive
+                                    ? Colors.green
+                                    : Colors.grey,
+                                labelStyle: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
                                 visualDensity: VisualDensity.compact,
                                 padding: EdgeInsets.zero,
                               ),
@@ -2017,11 +2946,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           const SizedBox(height: 8),
                           Text(
                             '₹$rate per Bottle Sold',
-                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(8),
@@ -2029,8 +2965,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                             child: Row(
                               children: [
                                 Icon(
-                                  isQuotaActive ? Icons.lock_clock : Icons.lock_open,
-                                  color: isQuotaActive ? Colors.amber.shade200 : Colors.green.shade200,
+                                  isQuotaActive
+                                      ? Icons.lock_clock
+                                      : Icons.lock_open,
+                                  color: isQuotaActive
+                                      ? Colors.amber.shade200
+                                      : Colors.green.shade200,
                                   size: 16,
                                 ),
                                 const SizedBox(width: 8),
@@ -2039,7 +2979,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     isQuotaActive
                                         ? 'Condition Gate Active: Referrer must sell >= $quota bottles today for downline commissions to unlock.'
                                         : 'Gate Inactive: Commissions unlock immediately with no sales quota.',
-                                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -2072,18 +3015,29 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       children: [
                         const Text(
                           'Workforce Tree Hierarchy',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textPrimary),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                         Text(
                           '${_referralTreeData['total_salesmen'] ?? treeList.length} Salesmen',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Tree displays direct downlines (A ➔ B, D; B ➔ C). Referrer receives ₹$rate per bottle sold by their referral.',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (treeList.isEmpty)
@@ -2093,17 +3047,32 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           padding: const EdgeInsets.all(24),
                           child: Column(
                             children: [
-                              Icon(Icons.account_tree_outlined, size: 48, color: Colors.grey.shade400),
+                              Icon(
+                                Icons.account_tree_outlined,
+                                size: 48,
+                                color: Colors.grey.shade400,
+                              ),
                               const SizedBox(height: 12),
-                              const Text('No workforce tree nodes found', style: TextStyle(fontWeight: FontWeight.bold)),
+                              const Text(
+                                'No workforce tree nodes found',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
                               const SizedBox(height: 4),
-                              Text('Salesmen referral relationships will appear here.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                              Text(
+                                'Salesmen referral relationships will appear here.',
+                                style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 12,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       )
                     else
-                      ...treeList.map((rootNode) => _buildWorkforceTreeNode(rootNode, 0)),
+                      ...treeList.map(
+                        (rootNode) => _buildWorkforceTreeNode(rootNode, 0),
+                      ),
                   ],
 
                   // SUBTAB 1: COMMISSION LEDGER & PAYOUTS
@@ -2113,11 +3082,19 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       children: [
                         const Text(
                           'Commissions Ledger',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textPrimary),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                            color: AppColors.textPrimary,
+                          ),
                         ),
                         Text(
                           '${_referrals.length} Transactions',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
@@ -2128,7 +3105,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         child: const Padding(
                           padding: EdgeInsets.all(24),
                           child: Center(
-                            child: Text('No referral commissions recorded yet.'),
+                            child: Text(
+                              'No referral commissions recorded yet.',
+                            ),
                           ),
                         ),
                       )
@@ -2139,9 +3118,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         itemCount: _referrals.length,
                         itemBuilder: (ctx, idx) {
                           final ref = _referrals[idx];
-                          final status = (ref['status'] ?? 'pending').toString().toLowerCase();
+                          final status = (ref['status'] ?? 'pending')
+                              .toString()
+                              .toLowerCase();
                           final isPaid = status == 'paid';
-                          final isUnlocked = status == 'unlocked' || status == 'pending';
+                          final isUnlocked =
+                              status == 'unlocked' || status == 'pending';
                           final isQuotaPending = status == 'quota_pending';
 
                           Color statusColor = Colors.orange;
@@ -2162,7 +3144,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                             color: AppColors.cardBg,
                             margin: const EdgeInsets.only(bottom: 12),
                             elevation: 1,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             child: Padding(
                               padding: const EdgeInsets.all(14),
                               child: Column(
@@ -2172,42 +3156,71 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     children: [
                                       CircleAvatar(
                                         radius: 16,
-                                        backgroundColor: statusColor.withValues(alpha: 0.15),
-                                        child: Icon(statusIcon, color: statusColor, size: 18),
+                                        backgroundColor: statusColor.withValues(
+                                          alpha: 0.15,
+                                        ),
+                                        child: Icon(
+                                          statusIcon,
+                                          color: statusColor,
+                                          size: 18,
+                                        ),
                                       ),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               '${ref['referrer_name'] ?? 'Referrer'} ➔ ${ref['referred_name'] ?? ref['seller_name'] ?? 'Seller'}',
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: AppColors.textPrimary,
+                                              ),
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
                                               'Sold: ${ref['bottles_sold'] ?? 0} bottles @ ₹${ref['rate_per_bottle'] ?? rate}/bottle',
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey.shade600,
+                                              ),
                                             ),
                                           ],
                                         ),
                                       ),
                                       Column(
-                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
                                         children: [
                                           Text(
                                             '₹${(ref['commission_amount'] ?? ref['bonus_amount'] ?? 0)}',
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.primary),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                              color: AppColors.primary,
+                                            ),
                                           ),
                                           Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
                                             decoration: BoxDecoration(
-                                              color: statusColor.withValues(alpha: 0.1),
-                                              borderRadius: BorderRadius.circular(4),
+                                              color: statusColor.withValues(
+                                                alpha: 0.1,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
                                             ),
                                             child: Text(
                                               statusLabel,
-                                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: statusColor),
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.bold,
+                                                color: statusColor,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -2221,16 +3234,25 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                       decoration: BoxDecoration(
                                         color: Colors.amber.shade50,
                                         borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: Colors.amber.shade200),
+                                        border: Border.all(
+                                          color: Colors.amber.shade200,
+                                        ),
                                       ),
                                       child: Row(
                                         children: [
-                                          Icon(Icons.info_outline, size: 14, color: Colors.amber.shade900),
+                                          Icon(
+                                            Icons.info_outline,
+                                            size: 14,
+                                            color: Colors.amber.shade900,
+                                          ),
                                           const SizedBox(width: 6),
                                           Expanded(
                                             child: Text(
                                               'Held: Referrer has not yet met the minimum quota of $quota personal bottles sold.',
-                                              style: TextStyle(fontSize: 11, color: Colors.amber.shade900),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.amber.shade900,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -2245,11 +3267,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: AppColors.accent,
                                           foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 8,
+                                          ),
                                           visualDensity: VisualDensity.compact,
                                         ),
-                                        onPressed: () => _processReferralPayout(ref['id']),
-                                        icon: const Icon(Icons.payments, size: 14),
+                                        onPressed: () =>
+                                            _processReferralPayout(ref['id']),
+                                        icon: const Icon(
+                                          Icons.payments,
+                                          size: 14,
+                                        ),
                                         label: const Text('Disburse Payout'),
                                       ),
                                     ),
@@ -2275,9 +3304,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final bottlesSold = node['bottles_sold_today'] ?? 0;
     final minQuota = node['min_quota'] ?? 5;
     final isQualified = node['is_qualified'] == true;
-    final unlockedComm = (node['unlocked_commission'] as num?)?.toDouble() ?? 0.0;
+    final unlockedComm =
+        (node['unlocked_commission'] as num?)?.toDouble() ?? 0.0;
     final pendingComm = (node['pending_commission'] as num?)?.toDouble() ?? 0.0;
-    final children = (node['children'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final children =
+        (node['children'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
     return Container(
       margin: EdgeInsets.only(left: depth * 16.0, bottom: 10),
@@ -2285,12 +3316,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         color: depth == 0 ? Colors.white : AppColors.cardBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: depth == 0 ? AppColors.primary.withValues(alpha: 0.35) : Colors.grey.shade300,
+          color: depth == 0
+              ? AppColors.primary.withValues(alpha: 0.35)
+              : Colors.grey.shade300,
           width: depth == 0 ? 1.5 : 1,
         ),
-        boxShadow: depth == 0 ? [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 2))
-        ] : null,
+        boxShadow: depth == 0
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -2301,10 +3340,16 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               children: [
                 CircleAvatar(
                   radius: 17,
-                  backgroundColor: depth == 0 ? AppColors.primary : AppColors.accent,
+                  backgroundColor: depth == 0
+                      ? AppColors.primary
+                      : AppColors.accent,
                   child: Text(
                     name.isNotEmpty ? name[0].toUpperCase() : 'S',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2317,16 +3362,35 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           Flexible(
                             child: Text(
                               name,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textPrimary),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: AppColors.textPrimary,
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (depth == 0) ...[
                             const SizedBox(width: 6),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                              decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                              child: const Text('ROOT', style: TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.bold)),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withValues(
+                                  alpha: 0.12,
+                                ),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'ROOT',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ],
                         ],
@@ -2334,29 +3398,49 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       const SizedBox(height: 2),
                       Text(
                         'Sales: $bottlesSold / $minQuota btls sold today',
-                        style: TextStyle(color: Colors.grey.shade700, fontSize: 11),
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
-                    color: isQualified ? Colors.green.shade50 : Colors.amber.shade50,
+                    color: isQualified
+                        ? Colors.green.shade50
+                        : Colors.amber.shade50,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: isQualified ? Colors.green.shade300 : Colors.amber.shade300),
+                    border: Border.all(
+                      color: isQualified
+                          ? Colors.green.shade300
+                          : Colors.amber.shade300,
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(isQualified ? Icons.verified : Icons.hourglass_empty, size: 12, color: isQualified ? Colors.green.shade700 : Colors.amber.shade800),
+                      Icon(
+                        isQualified ? Icons.verified : Icons.hourglass_empty,
+                        size: 12,
+                        color: isQualified
+                            ? Colors.green.shade700
+                            : Colors.amber.shade800,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         isQualified ? 'Qualified' : 'Pending Quota',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: isQualified ? Colors.green.shade800 : Colors.amber.shade900,
+                          color: isQualified
+                              ? Colors.green.shade800
+                              : Colors.amber.shade900,
                         ),
                       ),
                     ],
@@ -2369,10 +3453,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               spacing: 6,
               runSpacing: 4,
               children: [
-                _treeStatChip(Icons.people_outline, '${node['downline_count'] ?? 0} Downlines', Colors.blueGrey),
-                _treeStatChip(Icons.payments_outlined, '₹${unlockedComm.toStringAsFixed(0)} Earned', Colors.green),
+                _treeStatChip(
+                  Icons.people_outline,
+                  '${node['downline_count'] ?? 0} Downlines',
+                  Colors.blueGrey,
+                ),
+                _treeStatChip(
+                  Icons.payments_outlined,
+                  '₹${unlockedComm.toStringAsFixed(0)} Earned',
+                  Colors.green,
+                ),
                 if (pendingComm > 0)
-                  _treeStatChip(Icons.lock_clock, '₹${pendingComm.toStringAsFixed(0)} Quota-Held', Colors.orange),
+                  _treeStatChip(
+                    Icons.lock_clock,
+                    '₹${pendingComm.toStringAsFixed(0)} Quota-Held',
+                    Colors.orange,
+                  ),
               ],
             ),
             if (children.isNotEmpty) ...[
@@ -2381,17 +3477,27 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 padding: const EdgeInsets.only(left: 4),
                 child: Row(
                   children: [
-                    const Icon(Icons.subdirectory_arrow_right, size: 15, color: Colors.grey),
+                    const Icon(
+                      Icons.subdirectory_arrow_right,
+                      size: 15,
+                      color: Colors.grey,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Referred Downlines (${children.length}):',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade700),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade700,
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 6),
-              ...children.map((child) => _buildWorkforceTreeNode(child, depth + 1)),
+              ...children.map(
+                (child) => _buildWorkforceTreeNode(child, depth + 1),
+              ),
             ],
           ],
         ),
@@ -2411,7 +3517,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         children: [
           Icon(icon, size: 11, color: color.shade700),
           const SizedBox(width: 4),
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color.shade900)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: color.shade900,
+            ),
+          ),
         ],
       ),
     );
@@ -2422,7 +3535,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Inventory & Stock Movement'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
       ),
       body: Column(
         children: [
@@ -2446,9 +3562,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             child: _inventorySubTab == 0
                 ? _buildGlobalStockList()
                 : _inventorySubTab == 1
-                    ? _buildTransferLedgerList()
-                    : _buildAlertsList(),
-          )
+                ? _buildTransferLedgerList()
+                : _buildAlertsList(),
+          ),
         ],
       ),
     );
@@ -2463,7 +3579,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         style: TextStyle(
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
           color: isSelected ? AppColors.accent : AppColors.textSecondary,
-          decoration: isSelected ? TextDecoration.underline : TextDecoration.none,
+          decoration: isSelected
+              ? TextDecoration.underline
+              : TextDecoration.none,
         ),
       ),
     );
@@ -2484,7 +3602,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   title: Text(s['product']?['name'] ?? 'Product'),
                   subtitle: Text('Held by: ${s['owner_name']}'),
                   trailing: Chip(
-                    label: Text('${s['quantity']} units', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    label: Text(
+                      '${s['quantity']} units',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     backgroundColor: AppColors.primary.withValues(alpha: 0.1),
                   ),
                 ),
@@ -2505,10 +3626,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 color: AppColors.cardBg,
                 margin: const EdgeInsets.only(bottom: 10),
                 child: ListTile(
-                  leading: const CircleAvatar(backgroundColor: Colors.blueGrey, child: Icon(Icons.swap_horiz, color: Colors.white)),
+                  leading: const CircleAvatar(
+                    backgroundColor: Colors.blueGrey,
+                    child: Icon(Icons.swap_horiz, color: Colors.white),
+                  ),
                   title: Text('${t['from_name']} ➔ ${t['to_name']}'),
-                  subtitle: Text('Item: ${t['product']?['name'] ?? 'Product'} • Qty: ${t['quantity']}'),
-                  trailing: const Chip(label: Text('Completed', style: TextStyle(fontSize: 10, color: Colors.green))),
+                  subtitle: Text(
+                    'Item: ${t['product']?['name'] ?? 'Product'} • Qty: ${t['quantity']}',
+                  ),
+                  trailing: const Chip(
+                    label: Text(
+                      'Completed',
+                      style: TextStyle(fontSize: 10, color: Colors.green),
+                    ),
+                  ),
                 ),
               );
             },
@@ -2517,7 +3648,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   Widget _buildAlertsList() {
     return _alerts.isEmpty
-        ? const Center(child: Text('All stock levels are above safety thresholds!'))
+        ? const Center(
+            child: Text('All stock levels are above safety thresholds!'),
+          )
         : ListView.builder(
             padding: const EdgeInsets.all(12),
             itemCount: _alerts.length,
@@ -2528,9 +3661,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 margin: const EdgeInsets.only(bottom: 10),
                 child: ListTile(
                   leading: const Icon(Icons.warning, color: Colors.red),
-                  title: Text(a['product']?['name'] ?? 'Product', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('Total Available: ${a['total_quantity']} • Threshold: ${a['threshold']}'),
-                  trailing: Chip(label: Text('Deficit: -${a['deficit']}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+                  title: Text(
+                    a['product']?['name'] ?? 'Product',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    'Total Available: ${a['total_quantity']} • Threshold: ${a['threshold']}',
+                  ),
+                  trailing: Chip(
+                    label: Text(
+                      'Deficit: -${a['deficit']}',
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ),
               );
             },
@@ -2539,12 +3685,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
   // --- MODULE 6: SALES OVERSIGHT ---
   Widget _buildSalesModule() {
-    final filteredSales = _sales.filterSales(_salesPaymentFilter, _salesCustomerFilter);
+    final filteredSales = _sales.filterSales(
+      _salesPaymentFilter,
+      _salesCustomerFilter,
+    );
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('System Sales Oversight'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
       ),
       body: Column(
         children: [
@@ -2555,26 +3707,52 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: _salesPaymentFilter,
-                    decoration: const InputDecoration(labelText: 'Payment Mode', contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4)),
+                    decoration: const InputDecoration(
+                      labelText: 'Payment Mode',
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                    ),
                     items: const [
-                      DropdownMenuItem(value: 'all', child: Text('All Payments')),
-                      DropdownMenuItem(value: 'online', child: Text('Online Only')),
+                      DropdownMenuItem(
+                        value: 'all',
+                        child: Text('All Payments'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'online',
+                        child: Text('Online Only'),
+                      ),
                       DropdownMenuItem(value: 'cash', child: Text('Cash Only')),
                     ],
-                    onChanged: (v) => setState(() => _salesPaymentFilter = v ?? 'all'),
+                    onChanged: (v) =>
+                        setState(() => _salesPaymentFilter = v ?? 'all'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: _salesCustomerFilter,
-                    decoration: const InputDecoration(labelText: 'Customer Tier', contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 4)),
+                    decoration: const InputDecoration(
+                      labelText: 'Customer Tier',
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                    ),
                     items: const [
-                      DropdownMenuItem(value: 'all', child: Text('All Customers')),
+                      DropdownMenuItem(
+                        value: 'all',
+                        child: Text('All Customers'),
+                      ),
                       DropdownMenuItem(value: 'retail', child: Text('Retail')),
-                      DropdownMenuItem(value: 'distributor', child: Text('Distributor')),
+                      DropdownMenuItem(
+                        value: 'distributor',
+                        child: Text('Distributor'),
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _salesCustomerFilter = v ?? 'all'),
+                    onChanged: (v) =>
+                        setState(() => _salesCustomerFilter = v ?? 'all'),
                   ),
                 ),
               ],
@@ -2594,17 +3772,32 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         margin: const EdgeInsets.only(bottom: 10),
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: isOnline ? Colors.green.shade100 : Colors.amber.shade100,
-                            child: Icon(isOnline ? Icons.payment : Icons.money, color: isOnline ? Colors.green : Colors.amber.shade800),
+                            backgroundColor: isOnline
+                                ? Colors.green.shade100
+                                : Colors.amber.shade100,
+                            child: Icon(
+                              isOnline ? Icons.payment : Icons.money,
+                              color: isOnline
+                                  ? Colors.green
+                                  : Colors.amber.shade800,
+                            ),
                           ),
                           title: Text(s['product']?['name'] ?? 'Product'),
-                          subtitle: Text('Sold by: ${s['salesman']?['name'] ?? 'Salesman'} • Qty: ${s['quantity']} • ${s['customer_type'] ?? 'retail'}'),
-                          trailing: Text('₹${s['amount']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          subtitle: Text(
+                            'Sold by: ${s['salesman']?['name'] ?? 'Salesman'} • Qty: ${s['quantity']} • ${s['customer_type'] ?? 'retail'}',
+                          ),
+                          trailing: Text(
+                            '₹${s['amount']}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
                         ),
                       );
                     },
                   ),
-          )
+          ),
         ],
       ),
     );
@@ -2615,7 +3808,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('System Audit Trail & Logs'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _activeModule = 0)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => setState(() => _activeModule = 0),
+        ),
       ),
       body: _auditLogs.isEmpty
           ? const Center(child: Text('No audit events logged yet'))
@@ -2628,13 +3824,27 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   color: AppColors.cardBg,
                   margin: const EdgeInsets.only(bottom: 10),
                   child: ListTile(
-                    leading: const CircleAvatar(backgroundColor: Colors.indigo, child: Icon(Icons.history, color: Colors.white)),
-                    title: Text(log['action'] ?? 'ACTION', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    leading: const CircleAvatar(
+                      backgroundColor: Colors.indigo,
+                      child: Icon(Icons.history, color: Colors.white),
+                    ),
+                    title: Text(
+                      log['action'] ?? 'ACTION',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('By: ${log['user_name'] ?? 'Admin'} on ${log['entity_name']}'),
-                        Text('${log['details'] ?? ''}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                        Text(
+                          'By: ${log['user_name'] ?? 'Admin'} on ${log['entity_name']}',
+                        ),
+                        Text(
+                          '${log['details'] ?? ''}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -2652,15 +3862,24 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       } else if (_settlementFilter == 'tally_zero') {
         return (double.tryParse(s['difference']?.toString() ?? '0') ?? 0) == 0;
       } else if (_settlementFilter == 'has_diff') {
-        return (double.tryParse(s['difference']?.toString() ?? '0') ?? 0).abs() > 0.01;
+        return (double.tryParse(s['difference']?.toString() ?? '0') ?? 0)
+                .abs() >
+            0.01;
       } else if (_settlementFilter == 'settled') {
         return s['status'] == 'settled' || s['status'] == 'reconciled';
       }
       return true;
     }).toList();
 
-    final pendingCount = _settlements.where((s) => s['status'] != 'settled' && s['status'] != 'reconciled').length;
-    final totalDiff = _settlements.fold<double>(0.0, (sum, s) => sum + (double.tryParse(s['difference']?.toString() ?? '0') ?? 0.0).abs());
+    final pendingCount = _settlements
+        .where((s) => s['status'] != 'settled' && s['status'] != 'reconciled')
+        .length;
+    final totalDiff = _settlements.fold<double>(
+      0.0,
+      (sum, s) =>
+          sum +
+          (double.tryParse(s['difference']?.toString() ?? '0') ?? 0.0).abs(),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -2703,12 +3922,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Unsettled difference of ₹${totalDiff.toStringAsFixed(0)} pending reconciliation across salesmen.',
-                      style: TextStyle(color: Colors.orange.shade900, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: Colors.orange.shade900,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -2722,17 +3949,30 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.assignment_turned_in_outlined, size: 54, color: AppColors.textSecondary.withValues(alpha: 0.5)),
+                          Icon(
+                            Icons.assignment_turned_in_outlined,
+                            size: 54,
+                            color: AppColors.textSecondary.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           const Text(
                             'No Settlement Records Found',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           const Text(
                             'Salesmen daily tally reports and end-of-day bottle settlements will be submitted here for Super Admin approval.',
                             textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                         ],
                       ),
@@ -2744,14 +3984,26 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     itemBuilder: (ctx, idx) {
                       final s = filtered[idx];
                       final salesman = s['salesman'] as Map<String, dynamic>?;
-                      final salesmanName = salesman?['name'] ?? s['salesman_name'] ?? 'Salesman (${s['salesman_id'] ?? 'Unknown'})';
+                      final salesmanName =
+                          salesman?['name'] ??
+                          s['salesman_name'] ??
+                          'Salesman (${s['salesman_id'] ?? 'Unknown'})';
                       final dispatched = s['bottles_dispatched'] ?? 0;
                       final sold = s['bottles_sold'] ?? 0;
                       final unsold = s['unsold_bottles'] ?? 0;
-                      final cash = double.tryParse(s['cash_collected']?.toString() ?? '0') ?? 0;
-                      final diff = double.tryParse(s['difference']?.toString() ?? '0') ?? 0;
-                      final status = (s['status'] ?? 'pending').toString().toLowerCase();
-                      final isSettled = status == 'settled' || status == 'reconciled';
+                      final cash =
+                          double.tryParse(
+                            s['cash_collected']?.toString() ?? '0',
+                          ) ??
+                          0;
+                      final diff =
+                          double.tryParse(s['difference']?.toString() ?? '0') ??
+                          0;
+                      final status = (s['status'] ?? 'pending')
+                          .toString()
+                          .toLowerCase();
+                      final isSettled =
+                          status == 'settled' || status == 'reconciled';
                       final hasDiff = diff.abs() > 0.01;
 
                       return Card(
@@ -2762,7 +4014,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           side: BorderSide(
                             color: isSettled
                                 ? Colors.green.shade200
-                                : (hasDiff ? Colors.orange.shade300 : Colors.blue.shade200),
+                                : (hasDiff
+                                      ? Colors.orange.shade300
+                                      : Colors.blue.shade200),
                           ),
                         ),
                         child: Padding(
@@ -2776,40 +4030,75 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     radius: 18,
                                     backgroundColor: isSettled
                                         ? Colors.green.shade50
-                                        : (hasDiff ? Colors.orange.shade50 : Colors.blue.shade50),
+                                        : (hasDiff
+                                              ? Colors.orange.shade50
+                                              : Colors.blue.shade50),
                                     child: Icon(
                                       isSettled
                                           ? Icons.check_circle_rounded
-                                          : (hasDiff ? Icons.error_outline_rounded : Icons.pending_rounded),
+                                          : (hasDiff
+                                                ? Icons.error_outline_rounded
+                                                : Icons.pending_rounded),
                                       color: isSettled
                                           ? Colors.green
-                                          : (hasDiff ? Colors.orange : Colors.blue),
+                                          : (hasDiff
+                                                ? Colors.orange
+                                                : Colors.blue),
                                       size: 20,
                                     ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text(salesmanName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                        Text('ID: ${s['id']} • Date: ${s['date_label'] ?? 'Today'}',
-                                            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                                        Text(
+                                          salesmanName,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        Text(
+                                          'ID: ${s['id']} • Date: ${s['date_label'] ?? 'Today'}',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: isSettled
                                           ? Colors.green.withValues(alpha: 0.1)
-                                          : (hasDiff ? Colors.orange.withValues(alpha: 0.1) : Colors.blue.withValues(alpha: 0.1)),
+                                          : (hasDiff
+                                                ? Colors.orange.withValues(
+                                                    alpha: 0.1,
+                                                  )
+                                                : Colors.blue.withValues(
+                                                    alpha: 0.1,
+                                                  )),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      isSettled ? 'SETTLED' : (hasDiff ? 'DIFFERENCE' : 'TALLY ZERO'),
+                                      isSettled
+                                          ? 'SETTLED'
+                                          : (hasDiff
+                                                ? 'DIFFERENCE'
+                                                : 'TALLY ZERO'),
                                       style: TextStyle(
-                                        color: isSettled ? Colors.green : (hasDiff ? Colors.orange.shade800 : Colors.blue),
+                                        color: isSettled
+                                            ? Colors.green
+                                            : (hasDiff
+                                                  ? Colors.orange.shade800
+                                                  : Colors.blue),
                                         fontWeight: FontWeight.bold,
                                         fontSize: 11,
                                       ),
@@ -2819,7 +4108,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                               ),
                               const Divider(height: 20),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceAround,
                                 children: [
                                   _stlStatCol('Dispatched', '$dispatched btls'),
                                   _stlStatCol('Sold', '$sold btls'),
@@ -2834,25 +4124,51 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        const Text('Cash Handover', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                                        Text('₹${cash.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green)),
+                                        const Text(
+                                          'Cash Handover',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
+                                        Text(
+                                          '₹${cash.toStringAsFixed(0)}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                            color: Colors.green,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
                                       children: [
-                                        const Text('Difference / Shortfall', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                                        const Text(
+                                          'Difference / Shortfall',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textSecondary,
+                                          ),
+                                        ),
                                         Text(
-                                          diff == 0 ? '₹0 (Perfect)' : '₹${diff.toStringAsFixed(0)}',
+                                          diff == 0
+                                              ? '₹0 (Perfect)'
+                                              : '₹${diff.toStringAsFixed(0)}',
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 15,
-                                            color: diff == 0 ? Colors.green : Colors.red,
+                                            color: diff == 0
+                                                ? Colors.green
+                                                : Colors.red,
                                           ),
                                         ),
                                       ],
@@ -2865,14 +4181,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 SizedBox(
                                   width: double.infinity,
                                   child: ElevatedButton.icon(
-                                    onPressed: () => _handleApproveSettlement(s['id']?.toString() ?? ''),
+                                    onPressed: () => _handleApproveSettlement(
+                                      s['id']?.toString() ?? '',
+                                    ),
                                     icon: const Icon(Icons.verified, size: 16),
-                                    label: const Text('Approve & Mark Reconciled'),
+                                    label: const Text(
+                                      'Approve & Mark Reconciled',
+                                    ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppColors.primary,
                                       foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 10,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -2913,9 +4237,19 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   Widget _stlStatCol(String label, String value) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.textPrimary)),
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            color: AppColors.textPrimary,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+        ),
       ],
     );
   }
@@ -2931,9 +4265,12 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
     final totalSystemUnits = _globalStocks.fold<int>(
       0,
-      (sum, item) => sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0),
+      (sum, item) =>
+          sum + (int.tryParse(item['quantity']?.toString() ?? '0') ?? 0),
     );
-    final totalAssignedStaff = _workforce.where((u) => u['warehouse_id'] != null).length;
+    final totalAssignedStaff = _workforce
+        .where((u) => u['warehouse_id'] != null)
+        .length;
 
     return Scaffold(
       appBar: AppBar(
@@ -2957,7 +4294,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAddWarehouseDialog(),
         icon: const Icon(Icons.add_business_outlined),
-        label: const Text('Register Warehouse', style: TextStyle(fontWeight: FontWeight.bold)),
+        label: const Text(
+          'Register Warehouse',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
       ),
@@ -2985,7 +4325,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         : null,
                     filled: true,
                     fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(color: Colors.grey.shade300),
@@ -2995,17 +4338,33 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       borderSide: BorderSide(color: Colors.grey.shade300),
                     ),
                   ),
-                  onChanged: (val) => setState(() => _warehouseSearchQuery = val),
+                  onChanged: (val) =>
+                      setState(() => _warehouseSearchQuery = val),
                 ),
                 const SizedBox(height: 12),
                 // Network Metrics summary row
                 Row(
                   children: [
-                    _whStatCard('Active Hubs', '${_warehouses.length}', Icons.warehouse, Colors.teal),
+                    _whStatCard(
+                      'Active Hubs',
+                      '${_warehouses.length}',
+                      Icons.warehouse,
+                      Colors.teal,
+                    ),
                     const SizedBox(width: 8),
-                    _whStatCard('Total Units', '$totalSystemUnits', Icons.inventory_2, Colors.blue.shade700),
+                    _whStatCard(
+                      'Total Units',
+                      '$totalSystemUnits',
+                      Icons.inventory_2,
+                      Colors.blue.shade700,
+                    ),
                     const SizedBox(width: 8),
-                    _whStatCard('Assigned Staff', '$totalAssignedStaff', Icons.badge, Colors.purple.shade700),
+                    _whStatCard(
+                      'Assigned Staff',
+                      '$totalAssignedStaff',
+                      Icons.badge,
+                      Colors.purple.shade700,
+                    ),
                   ],
                 ),
               ],
@@ -3021,11 +4380,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.warehouse_outlined, size: 64, color: Colors.grey.shade400),
+                          Icon(
+                            Icons.warehouse_outlined,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
                           const SizedBox(height: 16),
                           Text(
-                            _warehouses.isEmpty ? 'No Warehouses Registered' : 'No Warehouses Found',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                            _warehouses.isEmpty
+                                ? 'No Warehouses Registered'
+                                : 'No Warehouses Found',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -3033,11 +4402,17 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                 ? 'Add regional hubs and central warehouses to manage storage and distribution.'
                                 : 'Try searching with a different name or location.',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                           const SizedBox(height: 20),
                           ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                            ),
                             onPressed: () => _showAddWarehouseDialog(),
                             icon: const Icon(Icons.add),
                             label: const Text('Register Warehouse Now'),
@@ -3052,17 +4427,33 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     itemBuilder: (ctx, index) {
                       final w = filteredWarehouses[index];
                       final whId = w['id']?.toString() ?? '';
-                      final whName = w['name']?.toString() ?? 'Unnamed Warehouse';
+                      final whName =
+                          w['name']?.toString() ?? 'Unnamed Warehouse';
                       final whLocation = w['location']?.toString() ?? 'Unknown';
 
                       // Find stocks in this warehouse
-                      final whStocks = _globalStocks.where((s) => s['warehouse_id']?.toString() == whId).toList();
-                      final whUnits = whStocks.fold<int>(0, (sum, s) => sum + (int.tryParse(s['quantity']?.toString() ?? '0') ?? 0));
-                      final distinctSkus = whStocks.map((s) => s['product_id']).toSet().length;
+                      final whStocks = _globalStocks
+                          .where((s) => s['warehouse_id']?.toString() == whId)
+                          .toList();
+                      final whUnits = whStocks.fold<int>(
+                        0,
+                        (sum, s) =>
+                            sum +
+                            (int.tryParse(s['quantity']?.toString() ?? '0') ??
+                                0),
+                      );
+                      final distinctSkus = whStocks
+                          .map((s) => s['product_id'])
+                          .toSet()
+                          .length;
 
                       // Find staff assigned
-                      final whStaff = _workforce.where((u) => u['warehouse_id']?.toString() == whId).toList();
-                      final storeAdmins = whStaff.where((u) => u['role'] == 'store_admin').toList();
+                      final whStaff = _workforce
+                          .where((u) => u['warehouse_id']?.toString() == whId)
+                          .toList();
+                      final storeAdmins = whStaff
+                          .where((u) => u['role'] == 'store_admin')
+                          .toList();
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 14),
@@ -3083,15 +4474,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                   Container(
                                     padding: const EdgeInsets.all(10),
                                     decoration: BoxDecoration(
-                                      color: AppColors.primary.withValues(alpha: 0.1),
+                                      color: AppColors.primary.withValues(
+                                        alpha: 0.1,
+                                      ),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: const Icon(Icons.warehouse, color: AppColors.primary, size: 26),
+                                    child: const Icon(
+                                      Icons.warehouse,
+                                      color: AppColors.primary,
+                                      size: 26,
+                                    ),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           whName,
@@ -3104,11 +4502,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                         const SizedBox(height: 4),
                                         Row(
                                           children: [
-                                            const Icon(Icons.location_on, size: 14, color: AppColors.textSecondary),
+                                            const Icon(
+                                              Icons.location_on,
+                                              size: 14,
+                                              color: AppColors.textSecondary,
+                                            ),
                                             const SizedBox(width: 3),
                                             Text(
-                                              whLocation.isNotEmpty ? whLocation : 'City unassigned',
-                                              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                                              whLocation.isNotEmpty
+                                                  ? whLocation
+                                                  : 'City unassigned',
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                color: AppColors.textSecondary,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -3116,16 +4524,25 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.green.shade50,
                                       borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: Colors.green.shade300),
+                                      border: Border.all(
+                                        color: Colors.green.shade300,
+                                      ),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.check_circle, size: 12, color: Colors.green.shade700),
+                                        Icon(
+                                          Icons.check_circle,
+                                          size: 12,
+                                          color: Colors.green.shade700,
+                                        ),
                                         const SizedBox(width: 4),
                                         Text(
                                           'ACTIVE HUB',
@@ -3144,20 +4561,49 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
 
                               // Quick Metrics Grid for this Warehouse
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.grey.shade50,
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.grey.shade200),
+                                  border: Border.all(
+                                    color: Colors.grey.shade200,
+                                  ),
                                 ),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceAround,
                                   children: [
-                                    _whMiniMetric('Stocked Units', '$whUnits', Icons.inventory_2_outlined, Colors.blue.shade700),
-                                    Container(height: 28, width: 1, color: Colors.grey.shade300),
-                                    _whMiniMetric('SKU Types', '$distinctSkus', Icons.category_outlined, Colors.indigo.shade700),
-                                    Container(height: 28, width: 1, color: Colors.grey.shade300),
-                                    _whMiniMetric('Staff', '${whStaff.length}', Icons.people_outline, Colors.teal.shade700),
+                                    _whMiniMetric(
+                                      'Stocked Units',
+                                      '$whUnits',
+                                      Icons.inventory_2_outlined,
+                                      Colors.blue.shade700,
+                                    ),
+                                    Container(
+                                      height: 28,
+                                      width: 1,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    _whMiniMetric(
+                                      'SKU Types',
+                                      '$distinctSkus',
+                                      Icons.category_outlined,
+                                      Colors.indigo.shade700,
+                                    ),
+                                    Container(
+                                      height: 28,
+                                      width: 1,
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    _whMiniMetric(
+                                      'Staff',
+                                      '${whStaff.length}',
+                                      Icons.people_outline,
+                                      Colors.teal.shade700,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -3166,19 +4612,27 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                               // In-charge staff banner
                               Row(
                                 children: [
-                                  const Icon(Icons.person_pin_outlined, size: 15, color: AppColors.textSecondary),
+                                  const Icon(
+                                    Icons.person_pin_outlined,
+                                    size: 15,
+                                    color: AppColors.textSecondary,
+                                  ),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
                                       storeAdmins.isNotEmpty
                                           ? 'Admin: ${storeAdmins.map((a) => a['name']).join(", ")}'
                                           : whStaff.isNotEmpty
-                                              ? 'Assigned: ${whStaff.map((a) => a['name']).join(", ")}'
-                                              : 'No Store Admin assigned yet',
+                                          ? 'Assigned: ${whStaff.map((a) => a['name']).join(", ")}'
+                                          : 'No Store Admin assigned yet',
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: storeAdmins.isNotEmpty ? AppColors.textPrimary : Colors.orange.shade800,
-                                        fontWeight: storeAdmins.isNotEmpty ? FontWeight.w500 : FontWeight.normal,
+                                        color: storeAdmins.isNotEmpty
+                                            ? AppColors.textPrimary
+                                            : Colors.orange.shade800,
+                                        fontWeight: storeAdmins.isNotEmpty
+                                            ? FontWeight.w500
+                                            : FontWeight.normal,
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -3194,12 +4648,29 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                     child: OutlinedButton.icon(
                                       style: OutlinedButton.styleFrom(
                                         foregroundColor: AppColors.primary,
-                                        side: const BorderSide(color: AppColors.primary),
-                                        padding: const EdgeInsets.symmetric(vertical: 8),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        side: const BorderSide(
+                                          color: AppColors.primary,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
                                       ),
-                                      icon: const Icon(Icons.swap_horiz, size: 16),
-                                      label: const Text('View Stock', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                      icon: const Icon(
+                                        Icons.swap_horiz,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'View Stock',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                       onPressed: () {
                                         setState(() {
                                           _activeModule = 5; // Stock & Movement
@@ -3210,12 +4681,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                   ),
                                   const SizedBox(width: 8),
                                   IconButton(
-                                    icon: const Icon(Icons.edit_outlined, size: 20, color: AppColors.primary),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 20,
+                                      color: AppColors.primary,
+                                    ),
                                     tooltip: 'Edit Warehouse',
                                     onPressed: () => _showAddWarehouseDialog(w),
                                   ),
                                   IconButton(
-                                    icon: Icon(Icons.delete_outline, size: 20, color: Colors.red.shade700),
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.red.shade700,
+                                    ),
                                     tooltip: 'Delete Warehouse',
                                     onPressed: () => _confirmDeleteWarehouse(w),
                                   ),
@@ -3246,9 +4725,23 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           children: [
             Icon(icon, size: 18, color: color),
             const SizedBox(height: 4),
-            Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
             const SizedBox(height: 1),
-            Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary), maxLines: 1),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.textSecondary,
+              ),
+              maxLines: 1,
+            ),
           ],
         ),
       ),
@@ -3263,11 +4756,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           children: [
             Icon(icon, size: 13, color: color),
             const SizedBox(width: 4),
-            Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+        ),
       ],
     );
   }
@@ -3288,21 +4791,63 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         final collector = (p['collector_name'] ?? '').toString().toLowerCase();
         final item = (p['item_description'] ?? '').toString().toLowerCase();
         final notes = (p['notes'] ?? '').toString().toLowerCase();
-        if (!payer.contains(q) && !no.contains(q) && !collector.contains(q) && !item.contains(q) && !notes.contains(q)) {
+        if (!payer.contains(q) &&
+            !no.contains(q) &&
+            !collector.contains(q) &&
+            !item.contains(q) &&
+            !notes.contains(q)) {
           return false;
         }
       }
       return true;
     }).toList();
 
-    final totalCollected = double.tryParse(_paymentsSummary['total_collected']?.toString() ?? '0') ??
-        _payments.where((p) => p['type'] != 'referral_payout').fold<double>(0.0, (sum, p) => sum + (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0));
-    final onlineTotal = double.tryParse(_paymentsSummary['online_total']?.toString() ?? '0') ??
-        _payments.where((p) => p['payment_method'] == 'online' || p['payment_method'] == 'upi').fold<double>(0.0, (sum, p) => sum + (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0));
-    final cashTotal = double.tryParse(_paymentsSummary['cash_total']?.toString() ?? '0') ??
-        _payments.where((p) => p['payment_method'] == 'cash').fold<double>(0.0, (sum, p) => sum + (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0));
-    final payoutsTotal = double.tryParse(_paymentsSummary['payouts_total']?.toString() ?? '0') ??
-        _payments.where((p) => p['type'] == 'referral_payout').fold<double>(0.0, (sum, p) => sum + (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0));
+    final totalCollected =
+        double.tryParse(
+          _paymentsSummary['total_collected']?.toString() ?? '0',
+        ) ??
+        _payments
+            .where((p) => p['type'] != 'referral_payout')
+            .fold<double>(
+              0.0,
+              (sum, p) =>
+                  sum +
+                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+            );
+    final onlineTotal =
+        double.tryParse(_paymentsSummary['online_total']?.toString() ?? '0') ??
+        _payments
+            .where(
+              (p) =>
+                  p['payment_method'] == 'online' ||
+                  p['payment_method'] == 'upi',
+            )
+            .fold<double>(
+              0.0,
+              (sum, p) =>
+                  sum +
+                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+            );
+    final cashTotal =
+        double.tryParse(_paymentsSummary['cash_total']?.toString() ?? '0') ??
+        _payments
+            .where((p) => p['payment_method'] == 'cash')
+            .fold<double>(
+              0.0,
+              (sum, p) =>
+                  sum +
+                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+            );
+    final payoutsTotal =
+        double.tryParse(_paymentsSummary['payouts_total']?.toString() ?? '0') ??
+        _payments
+            .where((p) => p['type'] == 'referral_payout')
+            .fold<double>(
+              0.0,
+              (sum, p) =>
+                  sum +
+                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+            );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9F7F5),
@@ -3330,13 +4875,33 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _payKpiCard('Total Inflow', '₹${totalCollected.toStringAsFixed(0)}', Icons.arrow_downward, Colors.green),
+                  _payKpiCard(
+                    'Total Inflow',
+                    '₹${totalCollected.toStringAsFixed(0)}',
+                    Icons.arrow_downward,
+                    Colors.green,
+                  ),
                   const SizedBox(width: 10),
-                  _payKpiCard('Online / UPI', '₹${onlineTotal.toStringAsFixed(0)}', Icons.qr_code_2, Colors.blue),
+                  _payKpiCard(
+                    'Online / UPI',
+                    '₹${onlineTotal.toStringAsFixed(0)}',
+                    Icons.qr_code_2,
+                    Colors.blue,
+                  ),
                   const SizedBox(width: 10),
-                  _payKpiCard('Cash Handover', '₹${cashTotal.toStringAsFixed(0)}', Icons.payments_outlined, Colors.amber.shade800),
+                  _payKpiCard(
+                    'Cash Handover',
+                    '₹${cashTotal.toStringAsFixed(0)}',
+                    Icons.payments_outlined,
+                    Colors.amber.shade800,
+                  ),
                   const SizedBox(width: 10),
-                  _payKpiCard('Payouts Outflow', '₹${payoutsTotal.toStringAsFixed(0)}', Icons.arrow_upward, Colors.purple),
+                  _payKpiCard(
+                    'Payouts Outflow',
+                    '₹${payoutsTotal.toStringAsFixed(0)}',
+                    Icons.arrow_upward,
+                    Colors.purple,
+                  ),
                 ],
               ),
             ),
@@ -3350,7 +4915,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               controller: _paymentSearchCtrl,
               decoration: InputDecoration(
                 hintText: 'Search by payer, receipt #, collector, notes...',
-                prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.textSecondary),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  size: 20,
+                  color: AppColors.textSecondary,
+                ),
                 suffixIcon: _paymentSearchQuery.isNotEmpty
                     ? IconButton(
                         icon: const Icon(Icons.clear, size: 18),
@@ -3360,7 +4929,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         },
                       )
                     : null,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
@@ -3373,7 +4945,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                  borderSide: const BorderSide(
+                    color: AppColors.primary,
+                    width: 1.5,
+                  ),
                 ),
               ),
               onChanged: (v) => setState(() => _paymentSearchQuery = v),
@@ -3404,7 +4979,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               children: [
                 Text(
                   'Mode: ',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
                 const SizedBox(width: 6),
                 _payModePill('all', 'All Modes'),
@@ -3415,7 +4994,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 const Spacer(),
                 Text(
                   '${filtered.length} records',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -3431,18 +5014,29 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade400),
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 64,
+                            color: Colors.grey.shade400,
+                          ),
                           const SizedBox(height: 12),
                           const Text(
                             'No payment records found',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             _paymentSearchQuery.isNotEmpty
                                 ? 'No transactions match "$_paymentSearchQuery"'
                                 : 'No payments recorded in this category yet',
-                            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                            ),
                             textAlign: TextAlign.center,
                           ),
                         ],
@@ -3485,12 +5079,20 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
             children: [
               Text(
                 value,
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
               const SizedBox(height: 1),
               Text(
                 label,
-                style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: Colors.grey.shade700,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ],
           ),
@@ -3513,7 +5115,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       selected: isSelected,
       selectedColor: AppColors.primary,
       backgroundColor: Colors.white,
-      side: BorderSide(color: isSelected ? AppColors.primary : Colors.grey.shade300),
+      side: BorderSide(
+        color: isSelected ? AppColors.primary : Colors.grey.shade300,
+      ),
       onSelected: (_) => setState(() => _paymentTypeFilter = key),
     );
   }
@@ -3526,9 +5130,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.accent.withValues(alpha: 0.15) : Colors.transparent,
+          color: isSelected
+              ? AppColors.accent.withValues(alpha: 0.15)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? AppColors.accent : Colors.grey.shade300),
+          border: Border.all(
+            color: isSelected ? AppColors.accent : Colors.grey.shade300,
+          ),
         ),
         child: Text(
           label,
@@ -3545,7 +5153,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   Widget _buildPaymentCard(Map<String, dynamic> item) {
     final isPayout = item['type'] == 'referral_payout';
     final isSettlement = item['type'] == 'settlement';
-    final isOnline = item['payment_method'] == 'online' || item['payment_method'] == 'upi';
+    final isOnline =
+        item['payment_method'] == 'online' || item['payment_method'] == 'upi';
 
     IconData icon;
     Color iconColor;
@@ -3573,7 +5182,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       amountColor = Colors.green.shade800;
     }
 
-    final double amount = double.tryParse(item['amount']?.toString() ?? '0') ?? 0.0;
+    final double amount =
+        double.tryParse(item['amount']?.toString() ?? '0') ?? 0.0;
     final isCompleted = item['status'] == 'completed';
 
     return Card(
@@ -3608,14 +5218,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       children: [
                         Text(
                           item['payer_name'] ?? 'Direct Customer',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.textPrimary),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: AppColors.textPrimary,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           item['item_description'] ?? 'Product Sale',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -3627,22 +5244,37 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     children: [
                       Text(
                         '$prefix₹${amount.toStringAsFixed(0)}',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: amountColor),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: amountColor,
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: isCompleted ? Colors.green.shade50 : Colors.orange.shade50,
+                          color: isCompleted
+                              ? Colors.green.shade50
+                              : Colors.orange.shade50,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: isCompleted ? Colors.green.shade200 : Colors.orange.shade200),
+                          border: Border.all(
+                            color: isCompleted
+                                ? Colors.green.shade200
+                                : Colors.orange.shade200,
+                          ),
                         ),
                         child: Text(
                           isCompleted ? 'COMPLETED' : 'PENDING',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
-                            color: isCompleted ? Colors.green.shade800 : Colors.orange.shade800,
+                            color: isCompleted
+                                ? Colors.green.shade800
+                                : Colors.orange.shade800,
                           ),
                         ),
                       ),
@@ -3656,17 +5288,26 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
-                      color: isOnline ? Colors.blue.shade50 : Colors.amber.shade50,
+                      color: isOnline
+                          ? Colors.blue.shade50
+                          : Colors.amber.shade50,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      (item['payment_method'] ?? 'cash').toString().toUpperCase(),
+                      (item['payment_method'] ?? 'cash')
+                          .toString()
+                          .toUpperCase(),
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: isOnline ? Colors.blue.shade800 : Colors.amber.shade900,
+                        color: isOnline
+                            ? Colors.blue.shade800
+                            : Colors.amber.shade900,
                       ),
                     ),
                   ),
@@ -3674,12 +5315,19 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   Expanded(
                     child: Text(
                       'By: ${item['collector_name'] ?? 'Staff'} • ${_formatPayDate(item['created_at'])}',
-                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.arrow_forward_ios,
+                    size: 12,
+                    color: AppColors.textSecondary,
+                  ),
                 ],
               ),
             ],
@@ -3690,9 +5338,11 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   }
 
   void _showPaymentReceiptModal(Map<String, dynamic> item) {
-    final double amount = double.tryParse(item['amount']?.toString() ?? '0') ?? 0.0;
+    final double amount =
+        double.tryParse(item['amount']?.toString() ?? '0') ?? 0.0;
     final isPayout = item['type'] == 'referral_payout';
-    final isOnline = item['payment_method'] == 'online' || item['payment_method'] == 'upi';
+    final isOnline =
+        item['payment_method'] == 'online' || item['payment_method'] == 'upi';
 
     showModalBottomSheet(
       context: context,
@@ -3714,7 +5364,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 child: Container(
                   width: 44,
                   height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -3727,20 +5380,42 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                        child: const Icon(Icons.receipt_long, color: AppColors.primary, size: 22),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.receipt_long,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Official Payment Receipt', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text(item['payment_no'] ?? 'PAY-00000', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                          const Text(
+                            'Official Payment Receipt',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            item['payment_no'] ?? 'PAY-00000',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
                         ],
                       ),
                     ],
                   ),
-                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -3752,7 +5427,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   gradient: LinearGradient(
                     colors: [
                       isPayout ? Colors.purple.shade700 : AppColors.primary,
-                      isPayout ? Colors.purple.shade900 : const Color(0xFF3E2723),
+                      isPayout
+                          ? Colors.purple.shade900
+                          : const Color(0xFF3E2723),
                     ],
                   ),
                   borderRadius: BorderRadius.circular(16),
@@ -3761,16 +5438,27 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   children: [
                     Text(
                       isPayout ? 'Payout Disbursed' : 'Payment Received',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '₹${amount.toStringAsFixed(2)}',
-                      style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(20),
@@ -3778,11 +5466,21 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.greenAccent,
+                            size: 14,
+                          ),
                           const SizedBox(width: 5),
                           Text(
-                            (item['status'] ?? 'completed').toString().toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            (item['status'] ?? 'completed')
+                                .toString()
+                                .toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
@@ -3793,13 +5491,29 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               const SizedBox(height: 18),
 
               // Transaction Detail Grid
-              _receiptRow('Transaction Type', item['category'] ?? (isPayout ? 'Referral Payout' : 'Sales Receipt')),
-              _receiptRow('Payer / Customer', item['payer_name'] ?? 'Direct Customer'),
+              _receiptRow(
+                'Transaction Type',
+                item['category'] ??
+                    (isPayout ? 'Referral Payout' : 'Sales Receipt'),
+              ),
+              _receiptRow(
+                'Payer / Customer',
+                item['payer_name'] ?? 'Direct Customer',
+              ),
               if ((item['payer_phone'] ?? '').toString().isNotEmpty)
                 _receiptRow('Payer Contact', item['payer_phone']),
-              _receiptRow('Payment Channel', isOnline ? 'Online / UPI Digital Transfer' : 'Cash In Hand'),
-              _receiptRow('Staff / Collector', '${item['collector_name']} (${(item['collector_role'] ?? 'Staff').toString().replaceAll('_', ' ').toUpperCase()})'),
-              _receiptRow('Item / Purpose', item['item_description'] ?? 'Supply Chain Transaction'),
+              _receiptRow(
+                'Payment Channel',
+                isOnline ? 'Online / UPI Digital Transfer' : 'Cash In Hand',
+              ),
+              _receiptRow(
+                'Staff / Collector',
+                '${item['collector_name']} (${(item['collector_role'] ?? 'Staff').toString().replaceAll('_', ' ').toUpperCase()})',
+              ),
+              _receiptRow(
+                'Item / Purpose',
+                item['item_description'] ?? 'Supply Chain Transaction',
+              ),
               _receiptRow('Date & Time', _formatPayDate(item['created_at'])),
               if (item['reference_id'] != null)
                 _receiptRow('Reference ID', item['reference_id']),
@@ -3812,10 +5526,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 icon: const Icon(Icons.check, size: 18),
-                label: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                label: const Text(
+                  'Done',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
                 onPressed: () => Navigator.pop(ctx),
               ),
             ],
@@ -3833,13 +5552,24 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         children: [
           SizedBox(
             width: 125,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
               textAlign: TextAlign.end,
             ),
           ),
@@ -3903,9 +5633,14 @@ extension WorkforceFilter on List<Map<String, dynamic>> {
   List<Map<String, dynamic>> filterUsers(String role, String search) {
     return where((u) {
       final matchRole = role == 'all' || u['role'] == role;
-      final matchSearch = search.isEmpty ||
-          (u['name']?.toString().toLowerCase().contains(search.toLowerCase()) ?? false) ||
-          (u['email']?.toString().toLowerCase().contains(search.toLowerCase()) ?? false);
+      final matchSearch =
+          search.isEmpty ||
+          (u['name']?.toString().toLowerCase().contains(search.toLowerCase()) ??
+              false) ||
+          (u['email']?.toString().toLowerCase().contains(
+                search.toLowerCase(),
+              ) ??
+              false);
       return matchRole && matchSearch;
     }).toList();
   }
@@ -3915,7 +5650,9 @@ extension SalesFilter on List<Map<String, dynamic>> {
   List<Map<String, dynamic>> filterSales(String payment, String customerType) {
     return where((s) {
       final matchPayment = payment == 'all' || s['payment_method'] == payment;
-      final matchCust = customerType == 'all' || (s['customer_type'] ?? 'retail') == customerType;
+      final matchCust =
+          customerType == 'all' ||
+          (s['customer_type'] ?? 'retail') == customerType;
       return matchPayment && matchCust;
     }).toList();
   }

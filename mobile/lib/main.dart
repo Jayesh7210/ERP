@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'core/constants/colors.dart';
 import 'core/services/session_service.dart';
+import 'core/services/offline_sales_service.dart';
+import 'core/services/offline_sync_service.dart';
 import 'core/state/app_state.dart';
 import 'features/auth/login_page.dart';
 import 'features/shell/dashboard_shell.dart';
@@ -16,6 +18,10 @@ void main() async {
   if (cachedUser != null && cachedUser['role'] != null) {
     AppState.currentUser = cachedUser;
   }
+
+  // Initialize offline queues
+  await OfflineSalesService.init();
+  await OfflineSyncService.init();
 
   runApp(ErpApp(initialUser: AppState.currentUser));
 }

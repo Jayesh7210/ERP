@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants/colors.dart';
 import '../../core/state/app_state.dart';
+import '../../core/services/offline_sync_service.dart';
 
 // 3. FIELD SALES MANAGER (FIELD MANAGER) — CLIENT 5-SCREEN REDESIGN
 // =============================================================================
@@ -114,6 +115,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
     _loadAllFsmData();
   }
 
+  bool _isSyncingOffline = false;
+
   Future<void> _loadAllFsmData() async {
     setState(() => _isLoading = true);
     await Future.wait([
@@ -123,6 +126,115 @@ class _FsmDashboardState extends State<FsmDashboard> {
       _loadSettlementHub(),
     ]);
     if (mounted) setState(() => _isLoading = false);
+
+    // Auto-sync pending offline transactions for FSM
+    _syncPendingActions(silent: true);
+  }
+
+  Future<void> _syncPendingActions({bool silent = false}) async {
+    if (_isSyncingOffline) return;
+    final count = await OfflineSyncService.getPendingCount(role: 'field_sales_manager');
+    if (count == 0) return;
+
+    if (mounted) setState(() => _isSyncingOffline = true);
+
+    try {
+      final res = await OfflineSyncService.syncAll(
+        apiBaseUrl: AppState.apiBaseUrl,
+        role: 'field_sales_manager',
+      );
+
+      if (mounted) {
+        if (res.synced > 0) {
+          _loadDashboardMetrics();
+          _loadSettlementHub();
+          _loadTeamRoster();
+          if (!silent) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Synced ${res.synced} offline action${res.synced > 1 ? 's' : ''} to server!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else if (!silent && res.failed > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Sync failed: ${res.errors.isNotEmpty ? res.errors.first : 'Connection error'}'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSyncingOffline = false);
+    }
+  }
+
+  Widget _buildOfflineSyncBanner() {
+    return ValueListenableBuilder<int>(
+      valueListenable: OfflineSyncService.pendingCountNotifier,
+      builder: (context, pendingCount, _) {
+        if (pendingCount == 0) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3CD),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFFEEBA)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.amber.withValues(alpha: 0.12),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.cloud_upload_outlined, color: Color(0xFFB45309), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$pendingCount Offline Action${pendingCount > 1 ? 's' : ''} Stored',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF451A03)),
+                    ),
+                    const Text(
+                      'Saved on device. Tap to sync to server.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF78350F)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _isSyncingOffline ? null : () => _syncPendingActions(silent: false),
+                icon: _isSyncingOffline
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.sync, size: 14),
+                label: Text(
+                  _isSyncingOffline ? 'Syncing...' : 'Sync Now',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFB45309),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
 Future<void> _loadDashboardMetrics() async {
@@ -580,22 +692,29 @@ Future<void> _loadDashboardMetrics() async {
     String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/stock/transfer'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final result = await OfflineSyncService.executeWithOfflineFallback(
+        apiBaseUrl: AppState.apiBaseUrl,
+        endpoint: '/stock/transfer',
+        method: 'POST',
+        role: 'field_sales_manager',
+        type: 'stock_transfer',
+        title: 'Transfer to $salesmanName ($quantity units)',
+        userId: _fsmId,
+        payload: {
           'from_id': _fsmId,
           'to_id': salesmanId,
           'product_id': productId,
           'quantity': quantity,
           'status': 'pending',
-        }),
+        },
       );
 
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
-        if (body['transfer'] != null && body['transfer']['id'] != null) {
+      if (result['success'] == true) {
+        final body = result['data'];
+        if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
           transferId = body['transfer']['id'].toString();
+        } else if (result['action_id'] != null) {
+          transferId = result['action_id'].toString();
         }
       }
     } catch (_) {}
@@ -974,18 +1093,26 @@ Future<void> _loadDashboardMetrics() async {
               final prodName = tr['product']?['name'] ?? tr['product_name'] ?? 'Bottles';
 
               try {
-                final res = await http.put(
-                  Uri.parse('${AppState.apiBaseUrl}/stock/transfers/$trId/accept'),
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({'user_id': _fsmId}),
+                final result = await OfflineSyncService.executeWithOfflineFallback(
+                  apiBaseUrl: AppState.apiBaseUrl,
+                  endpoint: '/stock/transfers/$trId/accept',
+                  method: 'PUT',
+                  role: 'field_sales_manager',
+                  type: 'stock_accept',
+                  title: 'Accept Stock ($qty units)',
+                  userId: _fsmId,
+                  payload: {'user_id': _fsmId},
                 );
-                if (res.statusCode == 200 || res.statusCode == 201) {
+                if (result['success'] == true) {
                   if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                   if (mounted) {
+                    final isOffline = result['is_offline'] == true;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        backgroundColor: ClientColors.success,
-                        content: Text('✓ Verified & Received $qty units of $prodName into depot stock!'),
+                        backgroundColor: isOffline ? Colors.amber.shade800 : ClientColors.success,
+                        content: Text(isOffline
+                            ? '⚡ Stock accepted offline ($qty units)! Queued to sync to server.'
+                            : '✓ Verified & Received $qty units of $prodName into depot stock!'),
                         duration: const Duration(seconds: 3),
                       ),
                     );
@@ -1385,22 +1512,31 @@ Future<void> _loadDashboardMetrics() async {
               final online = (stl['online_payment'] ?? 0);
 
               try {
-                final res = await http.put(
-                  Uri.parse('${AppState.apiBaseUrl}/settlements/$stlId/approve'),
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({'approved_by': _fsmId}),
+                final result = await OfflineSyncService.executeWithOfflineFallback(
+                  apiBaseUrl: AppState.apiBaseUrl,
+                  endpoint: '/settlements/$stlId/approve',
+                  method: 'PUT',
+                  role: 'field_sales_manager',
+                  type: 'settlement_approval',
+                  title: 'Settlement Approval ($salesmanName)',
+                  userId: _fsmId,
+                  payload: {'approved_by': _fsmId},
                 );
-                if (res.statusCode == 200 || res.statusCode == 201) {
+
+                if (result['success'] == true) {
                   if (sheetCtx.mounted) Navigator.pop(sheetCtx);
                   if (mounted) {
+                    final isOffline = result['is_offline'] == true;
                     setState(() {
                       _settlementHub['depot_stock'] = ((_settlementHub['depot_stock'] ?? 0) as int) + returnQty;
                       _dashboardData['available_depot_stock'] = ((_dashboardData['available_depot_stock'] ?? 0) as int) + returnQty;
                     });
                     messenger.showSnackBar(
                       SnackBar(
-                        backgroundColor: ClientColors.success,
-                        content: Text('✓ Settlement Approved! $salesmanName reconciled ($soldQty sold, ₹${cash + online} collected). $returnQty bottles returned to Depot Stock.'),
+                        backgroundColor: isOffline ? Colors.amber.shade800 : ClientColors.success,
+                        content: Text(isOffline
+                            ? '⚡ Reconciled offline ($salesmanName)! Approval queued to sync.'
+                            : '✓ Settlement Approved! $salesmanName reconciled ($soldQty sold, ₹${cash + online} collected). $returnQty bottles returned to Depot Stock.'),
                         duration: const Duration(seconds: 4),
                       ),
                     );
@@ -2059,14 +2195,21 @@ Future<void> _loadDashboardMetrics() async {
         appBar: _buildTopAppBar(),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator(color: ClientColors.primary))
-            : IndexedStack(
-                index: _activeTab,
+            : Column(
                 children: [
-                  _buildManagerDashboardTab(),
-                  _buildMyTeamTab(),
-                  _buildOperationsHomeTab(),
-                  _buildReferralRequestsTab(),
-                  _buildSettlementHubTab(),
+                  _buildOfflineSyncBanner(),
+                  Expanded(
+                    child: IndexedStack(
+                      index: _activeTab,
+                      children: [
+                        _buildManagerDashboardTab(),
+                        _buildMyTeamTab(),
+                        _buildOperationsHomeTab(),
+                        _buildReferralRequestsTab(),
+                        _buildSettlementHubTab(),
+                      ],
+                    ),
+                  ),
                 ],
               ),
         bottomNavigationBar: _buildBottomNav(),

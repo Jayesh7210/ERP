@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants/colors.dart';
 import '../../core/state/app_state.dart';
+import '../../core/services/offline_sales_service.dart';
 
 // 4. SALESMAN DASHBOARD — CLIENT 5-SCREEN REDESIGN
 // =============================================================================
@@ -165,6 +166,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     super.dispose();
   }
 
+  bool _isSyncingOfflineSales = false;
+
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
     await Future.wait([
@@ -173,8 +176,69 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       _loadReferrals(),
       _loadCustomers(),
       _loadStockTransfers(),
+      _restoreOfflineSalesState(),
     ]);
     if (mounted) setState(() => _isLoading = false);
+
+    // Auto-sync pending offline sales in background
+    _syncPendingSales(silent: true);
+  }
+
+  /// Restore any unsynced offline sales into the local settlement counter
+  Future<void> _restoreOfflineSalesState() async {
+    try {
+      final queue = await OfflineSalesService.getQueue(salesmanId: _salesmanId);
+      final offlineQty = queue.fold<int>(0, (sum, s) => sum + (s['quantity'] as int? ?? 0));
+      if (offlineQty > 0 && mounted) {
+        setState(() {
+          _settlementSoldBottles = (_settlementSoldBottles + offlineQty).clamp(0, _totalDispatchedBottles);
+          _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
+          _cashHandoverCtrl.text = '${(_settlementSoldBottles * _bottleUnitPrice).toInt()}';
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Synchronize all pending offline sales to the server
+  Future<void> _syncPendingSales({bool silent = false}) async {
+    if (_isSyncingOfflineSales) return;
+    final count = await OfflineSalesService.getPendingCount(salesmanId: _salesmanId);
+    if (count == 0) return;
+
+    if (mounted) setState(() => _isSyncingOfflineSales = true);
+
+    try {
+      final res = await OfflineSalesService.syncAll(
+        apiBaseUrl: AppState.apiBaseUrl,
+        salesmanId: _salesmanId,
+      );
+
+      if (mounted) {
+        if (res.synced > 0) {
+          await _loadEarnings();
+          if (!silent) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Synced ${res.synced} offline sale${res.synced > 1 ? 's' : ''} to server!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else if (!silent && res.failed > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Sync issue: ${res.errors.isNotEmpty ? res.errors.first : 'Connection failed'}'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSyncingOfflineSales = false);
+    }
   }
 
   Future<void> _loadEarnings() async {
@@ -983,30 +1047,34 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   }
 
   Future<void> _executeSale(int qty, double totalAmt) async {
-    String receiptId = 'RCP-${DateTime.now().millisecondsSinceEpoch % 100000}';
-    try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/sales'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'salesman_id': _salesmanId,
-          'product_id': 'p1',
-          'quantity': qty,
-          'amount': totalAmt,
-          'payment_method': _salePaymentMode,
-          'customer_id': _isNewCustomer ? null : _saleCustomerId,
-          'customer_name': _isNewCustomer ? _saleCustNameCtrl.text.trim() : null,
-          'customer_phone': _isNewCustomer ? _saleCustPhoneCtrl.text.trim() : null,
-          'customer_address': _isNewCustomer ? _saleCustAddressCtrl.text.trim() : null,
-        }),
-      );
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        final data = jsonDecode(res.body);
-        if (data != null && data['id'] != null) {
-          receiptId = data['id'].toString();
-        }
+    final result = await OfflineSalesService.recordSale(
+      apiBaseUrl: AppState.apiBaseUrl,
+      salesmanId: _salesmanId,
+      productId: 'p1',
+      quantity: qty,
+      amount: totalAmt,
+      paymentMethod: _salePaymentMode,
+      customerId: _isNewCustomer ? null : _saleCustomerId,
+      customerName: _isNewCustomer ? _saleCustNameCtrl.text.trim() : null,
+      customerPhone: _isNewCustomer ? _saleCustPhoneCtrl.text.trim() : null,
+      customerAddress: _isNewCustomer ? _saleCustAddressCtrl.text.trim() : null,
+    );
+
+    if (result['success'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ ${result['error'] ?? 'Failed to record sale'}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
-    } catch (_) {}
+      return;
+    }
+
+    final bool isOffline = result['is_offline'] == true;
+    final String receiptId = result['receipt_id']?.toString() ?? 'RCP-${DateTime.now().millisecondsSinceEpoch % 100000}';
 
     // Update local state
     setState(() {
@@ -1020,29 +1088,64 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         context: context,
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.check_circle, color: Colors.green, size: 28),
-              SizedBox(width: 8),
-              Text('Sale Completed', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              Icon(
+                isOffline ? Icons.cloud_off_rounded : Icons.check_circle,
+                color: isOffline ? Colors.amber.shade700 : Colors.green,
+                size: 28,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isOffline ? 'Saved to Offline Queue' : 'Sale Completed',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (isOffline)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3CD),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFFEEBA)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.wifi_off_rounded, size: 18, color: Colors.amber.shade900),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Network unavailable. Sale is securely stored on your device and will automatically sync once internet is back.',
+                          style: TextStyle(fontSize: 11, color: const Color(0xFF451A03), height: 1.3),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               _infoRow('Receipt ID:', receiptId),
               _infoRow('Bottles Sold:', '$qty Bottles'),
               _infoRow('Unit Price:', '₹$_bottleUnitPrice'),
               _infoRow('Total Collected:', '₹$totalAmt'),
               _infoRow('Payment Mode:', _salePaymentMode.toUpperCase()),
+              _infoRow('Sync Status:', isOffline ? '⚡ Queued Locally' : '✅ Live on Server'),
             ],
           ),
           actions: [
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx),
-              style: ElevatedButton.styleFrom(backgroundColor: ClientColors.primary, foregroundColor: Colors.white),
-              child: const Text('Close & Print Receipt'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isOffline ? Colors.amber.shade800 : ClientColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(isOffline ? 'OK (Stored Safely)' : 'Close & Print Receipt'),
             ),
           ],
         ),
@@ -1226,6 +1329,76 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     );
   }
 
+  Widget _buildOfflineSyncBanner() {
+    return ValueListenableBuilder<int>(
+      valueListenable: OfflineSalesService.pendingCountNotifier,
+      builder: (context, pendingCount, _) {
+        if (pendingCount == 0) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3CD),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFFEEBA)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.amber.withValues(alpha: 0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade700.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.cloud_upload_outlined, color: Colors.amber.shade900, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$pendingCount Offline Sale${pendingCount > 1 ? 's' : ''} Stored',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF451A03)),
+                    ),
+                    Text(
+                      'Saved on device. Tap to sync to server.',
+                      style: TextStyle(fontSize: 11, color: Colors.amber.shade900),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _isSyncingOfflineSales ? null : () => _syncPendingSales(silent: false),
+                icon: _isSyncingOfflineSales
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.sync, size: 14),
+                label: Text(
+                  _isSyncingOfflineSales ? 'Syncing...' : 'Sync Now',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.shade800,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ===========================================================================
   // SCREEN 1: DASHBOARD TAB (Tab 0)
   // ===========================================================================
@@ -1276,6 +1449,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             ],
           ),
           const SizedBox(height: 16),
+
+          // Offline Sync Banner (if any unsynced offline sales)
+          _buildOfflineSyncBanner(),
 
           // 4 Quick Action Buttons
           Row(
@@ -1560,7 +1736,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           const Text('Welcome Back, Agent', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
           const SizedBox(height: 4),
           const Text("Ready for today's field operations?", style: TextStyle(fontSize: 13, color: ClientColors.textMuted)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          // Offline Sync Banner (if any unsynced offline sales)
+          _buildOfflineSyncBanner(),
+          const SizedBox(height: 4),
 
           // 2x2 Action Tiles
           Row(

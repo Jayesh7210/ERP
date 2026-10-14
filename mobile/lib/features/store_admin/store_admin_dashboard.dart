@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/constants/colors.dart';
 import '../../core/state/app_state.dart';
+import '../../core/services/offline_sync_service.dart';
 
 // 2. STORE ADMIN DASHBOARD (WAREHOUSE ADMIN)
 class StoreAdminDashboard extends StatefulWidget {
@@ -87,6 +88,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
     _loadAllStoreData();
   }
 
+  bool _isSyncingOffline = false;
+
   Future<void> _loadAllStoreData() async {
     setState(() => _isLoading = true);
     await Future.wait([
@@ -100,6 +103,116 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       _loadSales(),
     ]);
     if (mounted) setState(() => _isLoading = false);
+
+    // Auto-sync pending offline transactions for store_admin
+    _syncPendingActions(silent: true);
+  }
+
+  Future<void> _syncPendingActions({bool silent = false}) async {
+    if (_isSyncingOffline) return;
+    final count = await OfflineSyncService.getPendingCount(role: 'store_admin');
+    if (count == 0) return;
+
+    if (mounted) setState(() => _isSyncingOffline = true);
+
+    try {
+      final res = await OfflineSyncService.syncAll(
+        apiBaseUrl: AppState.apiBaseUrl,
+        role: 'store_admin',
+      );
+
+      if (mounted) {
+        if (res.synced > 0) {
+          _loadWarehouseStock();
+          _loadSales();
+          _loadIntakeHistory();
+          _loadTransfers();
+          if (!silent) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Synced ${res.synced} offline transaction${res.synced > 1 ? 's' : ''} to server!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        } else if (!silent && res.failed > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Sync failed: ${res.errors.isNotEmpty ? res.errors.first : 'Connection error'}'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _isSyncingOffline = false);
+    }
+  }
+
+  Widget _buildOfflineSyncBanner() {
+    return ValueListenableBuilder<int>(
+      valueListenable: OfflineSyncService.pendingCountNotifier,
+      builder: (context, pendingCount, _) {
+        if (pendingCount == 0) return const SizedBox.shrink();
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF3CD),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFFEEBA)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.amber.withValues(alpha: 0.12),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.cloud_upload_outlined, color: Color(0xFFB45309), size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$pendingCount Offline Action${pendingCount > 1 ? 's' : ''} Stored',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF451A03)),
+                    ),
+                    const Text(
+                      'Saved on device. Tap to sync to server.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF78350F)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _isSyncingOffline ? null : () => _syncPendingActions(silent: false),
+                icon: _isSyncingOffline
+                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.sync, size: 14),
+                label: Text(
+                  _isSyncingOffline ? 'Syncing...' : 'Sync Now',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFB45309),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadProductsAndPrices() async {
@@ -250,7 +363,12 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
             ? const Center(child: CircularProgressIndicator())
             : RefreshIndicator(
                 onRefresh: _loadAllStoreData,
-                child: _buildBody(),
+                child: Column(
+                  children: [
+                    _buildOfflineSyncBanner(),
+                    Expanded(child: _buildBody()),
+                  ],
+                ),
               ),
         bottomNavigationBar: BottomNavigationBar(
           currentIndex: _activeTab,
@@ -986,10 +1104,15 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
                               }
 
                               try {
-                                final res = await http.post(
-                                  Uri.parse('${AppState.apiBaseUrl}/stock/intake'),
-                                  headers: {'Content-Type': 'application/json'},
-                                  body: jsonEncode({
+                                final result = await OfflineSyncService.executeWithOfflineFallback(
+                                  apiBaseUrl: AppState.apiBaseUrl,
+                                  endpoint: '/stock/intake',
+                                  method: 'POST',
+                                  role: 'store_admin',
+                                  type: 'stock_intake',
+                                  title: 'Stock Intake ($qty units)',
+                                  userId: AppState.currentUser?['id'],
+                                  payload: {
                                     'warehouse_id': _warehouseId,
                                     'product_id': selectedProduct,
                                     'quantity': qty,
@@ -999,12 +1122,20 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
                                     'receipt_base64': base64Data,
                                     'receipt_filename': receiptFile?.name,
                                     'received_by': AppState.currentUser?['id'],
-                                  }),
+                                  },
                                 );
 
-                                if (res.statusCode == 201) {
+                                if (result['success'] == true) {
                                   if (ctx.mounted) Navigator.pop(ctx);
-                                  messenger.showSnackBar(const SnackBar(content: Text('Stock Intake Recorded Successfully!')));
+                                  final isOffline = result['is_offline'] == true;
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(isOffline
+                                          ? '⚡ Stock intake saved offline! Queued to sync once connected.'
+                                          : 'Stock Intake Recorded Successfully!'),
+                                      backgroundColor: isOffline ? Colors.amber.shade800 : Colors.green,
+                                    ),
+                                  );
                                   _loadAllStoreData();
                                   return;
                                 }
@@ -1359,23 +1490,30 @@ class _FsmDistributionViewState extends State<_FsmDistributionView> {
     setState(() => _isSubmitting = true);
 
     try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/stock/transfer'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final result = await OfflineSyncService.executeWithOfflineFallback(
+        apiBaseUrl: AppState.apiBaseUrl,
+        endpoint: '/stock/transfer',
+        method: 'POST',
+        role: 'store_admin',
+        type: 'stock_transfer',
+        title: 'FSM Stock Transfer ($qty units)',
+        userId: AppState.currentUser?['id'],
+        payload: {
           'from_id': widget.warehouseId,
           'to_id': _selectedFsmId,
           'product_id': _selectedProductId,
           'quantity': qty,
           'status': 'pending',
-        }),
+        },
       );
 
       String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
-      if (res.statusCode == 200) {
-        final body = jsonDecode(res.body);
-        if (body['transfer'] != null && body['transfer']['id'] != null) {
+      if (result['success'] == true) {
+        final body = result['data'];
+        if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
           transferId = body['transfer']['id'].toString();
+        } else if (result['action_id'] != null) {
+          transferId = result['action_id'].toString();
         }
       }
 
@@ -2045,10 +2183,15 @@ class _DirectRetailSaleViewState extends State<_DirectRetailSaleView> {
     setState(() => _isSubmitting = true);
 
     try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/sales'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final result = await OfflineSyncService.executeWithOfflineFallback(
+        apiBaseUrl: AppState.apiBaseUrl,
+        endpoint: '/sales',
+        method: 'POST',
+        role: 'store_admin',
+        type: 'sale',
+        title: 'Retail Sale ($qty units)',
+        userId: AppState.currentUser?['id'],
+        payload: {
           'warehouse_id': widget.warehouseId,
           'customer_id': _isNewCustomer ? null : _selectedCustomerId,
           'customer_name': _isNewCustomer ? _custNameController.text.trim() : null,
@@ -2058,21 +2201,40 @@ class _DirectRetailSaleViewState extends State<_DirectRetailSaleView> {
           'quantity': qty,
           'amount': totalAmount,
           'payment_method': _paymentMethod,
-        }),
+        },
       );
 
-      if (res.statusCode == 201) {
+      if (result['success'] == true) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Direct Customer Sale Recorded! Stock deducted.')));
+          final isOffline = result['is_offline'] == true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(isOffline
+                  ? '⚡ Direct Sale saved offline! Queued to sync once connected.'
+                  : 'Direct Customer Sale Recorded! Stock deducted.'),
+              backgroundColor: isOffline ? Colors.amber.shade800 : Colors.green,
+            ),
+          );
           _qtyController.text = '1';
           if (_isNewCustomer) _custNameController.clear();
           widget.onSaleComplete();
         }
         return;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ ${result['error'] ?? 'Failed to record sale'}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to record sale. Please check your network connection.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to record sale. Please try again.')),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -2362,10 +2524,15 @@ class _DistributorSaleViewState extends State<_DistributorSaleView> {
     setState(() => _isSubmitting = true);
 
     try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/sales'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final result = await OfflineSyncService.executeWithOfflineFallback(
+        apiBaseUrl: AppState.apiBaseUrl,
+        endpoint: '/sales',
+        method: 'POST',
+        role: 'store_admin',
+        type: 'sale',
+        title: 'Distributor Sale ($qty units)',
+        userId: AppState.currentUser?['id'],
+        payload: {
           'warehouse_id': widget.warehouseId,
           'customer_id': _isNewDistributor ? null : _selectedDistributorId,
           'customer_name': _isNewDistributor ? _distNameController.text.trim() : null,
@@ -2375,21 +2542,40 @@ class _DistributorSaleViewState extends State<_DistributorSaleView> {
           'quantity': qty,
           'amount': totalAmount,
           'payment_method': _paymentMethod,
-        }),
+        },
       );
 
-      if (res.statusCode == 201) {
+      if (result['success'] == true) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Distributor Bulk Sale Processed! Invoice Created.')));
+          final isOffline = result['is_offline'] == true;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(isOffline
+                  ? '⚡ Distributor bulk sale saved offline! Queued to sync once online.'
+                  : 'Distributor Bulk Sale Processed! Invoice Created.'),
+              backgroundColor: isOffline ? Colors.amber.shade800 : Colors.green,
+            ),
+          );
           _qtyController.text = '50';
           if (_isNewDistributor) _distNameController.clear();
           widget.onSaleComplete();
         }
         return;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ ${result['error'] ?? 'Failed to process bulk sale'}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to process bulk sale. Please check your network connection.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to process bulk sale. Please try again.')),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);

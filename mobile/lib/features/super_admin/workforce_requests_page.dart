@@ -801,6 +801,18 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                         child: Image.memory(
                           imageBytes,
                           fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            height: 200,
+                            alignment: Alignment.center,
+                            child: const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                                SizedBox(height: 8),
+                                Text('Unable to display image preview', style: TextStyle(color: Colors.grey)),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -981,7 +993,12 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
             Future<void> pickStaffDoc(ImageSource source) async {
               try {
                 final picker = ImagePicker();
-                final picked = await picker.pickImage(source: source, imageQuality: 85, maxWidth: 1600);
+                final picked = await picker.pickImage(
+                  source: source,
+                  imageQuality: 80,
+                  maxWidth: 1280,
+                  maxHeight: 1280,
+                );
                 if (picked != null) {
                   final bytes = await picked.readAsBytes();
                   final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -1136,7 +1153,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                         ),
                       ),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Row(
                             children: [
@@ -1153,30 +1170,67 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              if (selectedKycDoc.isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                GestureDetector(
-                                  onTap: () {
-                                    setDialogState(() {
-                                      selectedKycDoc = '';
-                                      selectedKycBase64 = null;
-                                      selectedKycBytes = null;
-                                    });
-                                  },
-                                  child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
-                                ),
-                              ],
                             ],
                           ),
                           if (selectedKycBytes != null) ...[
                             const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.memory(
-                                selectedKycBytes!,
-                                height: 110,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue.shade100),
+                              ),
+                              child: Row(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Image.memory(
+                                      selectedKycBytes!,
+                                      width: 60,
+                                      height: 60,
+                                      cacheWidth: 200,
+                                      cacheHeight: 200,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) => Container(
+                                        width: 60,
+                                        height: 60,
+                                        color: Colors.grey.shade200,
+                                        child: const Icon(Icons.broken_image, size: 24, color: Colors.grey),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          selectedKycDoc.startsWith('data:image') ? 'KYC Photo Attached' : selectedKycDoc,
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '${(selectedKycBytes!.lengthInBytes / 1024).toStringAsFixed(1)} KB attached',
+                                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                                    tooltip: 'Remove',
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        selectedKycDoc = '';
+                                        selectedKycBase64 = null;
+                                        selectedKycBytes = null;
+                                      });
+                                    },
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -2004,30 +2058,67 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (_selectedReqKycFile.isNotEmpty) ...[
-                              const SizedBox(width: 8),
-                              GestureDetector(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedReqKycFile = '';
-                                    _selectedReqKycBase64 = null;
-                                    _selectedReqKycBytes = null;
-                                  });
-                                },
-                                child: const Text('Remove', style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
                           ],
                         ),
                         if (_selectedReqKycBytes != null) ...[
                           const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              _selectedReqKycBytes!,
-                              height: 110,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade100),
+                            ),
+                            child: Row(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Image.memory(
+                                    _selectedReqKycBytes!,
+                                    width: 60,
+                                    height: 60,
+                                    cacheWidth: 200,
+                                    cacheHeight: 200,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => Container(
+                                      width: 60,
+                                      height: 60,
+                                      color: Colors.grey.shade200,
+                                      child: const Icon(Icons.broken_image, size: 24, color: Colors.grey),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _selectedReqKycFile.startsWith('data:image') ? 'KYC Photo Attached' : _selectedReqKycFile,
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        '${(_selectedReqKycBytes!.lengthInBytes / 1024).toStringAsFixed(1)} KB attached',
+                                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18, color: Colors.red),
+                                  tooltip: 'Remove',
+                                  onPressed: () {
+                                    setState(() {
+                                      _selectedReqKycFile = '';
+                                      _selectedReqKycBase64 = null;
+                                      _selectedReqKycBytes = null;
+                                    });
+                                  },
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -2055,7 +2146,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                           Navigator.pop(sheetCtx);
                                           try {
                                             final picker = ImagePicker();
-                                            final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 1600);
+                                            final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 80, maxWidth: 1280, maxHeight: 1280);
                                             if (picked != null) {
                                               final bytes = await picked.readAsBytes();
                                               final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -2076,7 +2167,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                           Navigator.pop(sheetCtx);
                                           try {
                                             final picker = ImagePicker();
-                                            final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85, maxWidth: 1600);
+                                            final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280, maxHeight: 1280);
                                             if (picked != null) {
                                               final bytes = await picked.readAsBytes();
                                               final base64Str = 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -2210,3 +2301,5 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
     );
   }
 }
+
+
