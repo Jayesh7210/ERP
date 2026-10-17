@@ -79,6 +79,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   List<Map<String, dynamic>> _retailCustomers = [];
   List<Map<String, dynamic>> _distributors = [];
   List<Map<String, dynamic>> _sales = [];
+  double _dispatchEarnings = 0.0;
+  int _dispatchedUnits = 0;
 
   String get _warehouseId => AppState.currentUser?['warehouse_id'] ?? 'w1';
 
@@ -101,6 +103,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       _loadFsmUsers(),
       _loadCustomers(),
       _loadSales(),
+      _loadEarnings(),
     ]);
     if (mounted) setState(() => _isLoading = false);
 
@@ -239,6 +242,21 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       }
     } catch (_) {
       _warehouseStocks = [];
+    }
+  }
+
+  Future<void> _loadEarnings() async {
+    try {
+      final userId = AppState.currentUser?['id'] ?? 'u2';
+      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/store-admin/earnings/$userId'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        _dispatchEarnings = (data['today_earned'] as num?)?.toDouble() ?? 0.0;
+        _dispatchedUnits = (data['units_dispatched'] as num?)?.toInt() ?? 0;
+      }
+    } catch (_) {
+      _dispatchEarnings = 0.0;
+      _dispatchedUnits = 0;
     }
   }
 
@@ -466,6 +484,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
                     children: [
                       _buildHeaderStat('Products', '${_products.length} SKUs'),
                       _buildHeaderStat('Total Stock', '$totalUnits Units'),
+                      _buildHeaderStat('Earnings', '₹${_dispatchEarnings.toStringAsFixed(0)} ($_dispatchedUnits u)'),
                       _buildHeaderStat('Low Stock', '${_alerts.length} Items', alert: _alerts.isNotEmpty),
                     ],
                   )

@@ -32,11 +32,15 @@ UPDATE users SET password = 'store123' WHERE role = 'store_admin' AND password I
 UPDATE users SET password = 'fsm123' WHERE role = 'field_sales_manager' AND password IS NULL;
 UPDATE users SET password = 'sales123' WHERE role = 'salesman' AND password IS NULL;
 
--- B. Products Table: Add pricing, category, alerts, images
+-- B. Products Table: Add pricing, category, alerts, images, and individual commissions
 ALTER TABLE products ADD COLUMN IF NOT EXISTS base_price DECIMAL(12, 2) DEFAULT 0.00;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'General';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS min_stock_alert INT DEFAULT 20;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS store_admin_commission DECIMAL(12, 2) DEFAULT 0.00;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS fsm_commission DECIMAL(12, 2) DEFAULT 0.00;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS salesman_commission DECIMAL(12, 2) DEFAULT 0.00;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS referral_commission DECIMAL(12, 2) DEFAULT 0.00;
 
 -- C. Sales Table: Add warehouse, customer link, customer type, referral code
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS warehouse_id UUID REFERENCES warehouses(id) ON DELETE SET NULL;

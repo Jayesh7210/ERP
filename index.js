@@ -83,9 +83,9 @@ const mockDb = {
   customers: [],
   userRequests: [],
   products: [
-    { id: 'p1', name: 'Premium 20L Water Jar', sku: 'WTR-20L', unit: 'jar', category: 'Beverages', base_price: 300, min_stock_alert: 25 },
-    { id: 'p2', name: '1L Mineral Water Box (12 Bottles)', sku: 'WTR-1L-BOX', unit: 'box', category: 'Beverages', base_price: 240, min_stock_alert: 15 },
-    { id: 'p3', name: '500ml Bottled Water Pack (24 Bottles)', sku: 'WTR-500ML', unit: 'pack', category: 'Beverages', base_price: 360, min_stock_alert: 30 }
+    { id: 'p1', name: 'Premium 20L Water Jar', sku: 'WTR-20L', unit: 'jar', category: 'Beverages', base_price: 300, min_stock_alert: 25, store_admin_commission: 5.0, fsm_commission: 10.0, salesman_commission: 50.0, referral_commission: 10.0 },
+    { id: 'p2', name: '1L Mineral Water Box (12 Bottles)', sku: 'WTR-1L-BOX', unit: 'box', category: 'Beverages', base_price: 240, min_stock_alert: 15, store_admin_commission: 4.0, fsm_commission: 8.0, salesman_commission: 40.0, referral_commission: 8.0 },
+    { id: 'p3', name: '500ml Bottled Water Pack (24 Bottles)', sku: 'WTR-500ML', unit: 'pack', category: 'Beverages', base_price: 360, min_stock_alert: 30, store_admin_commission: 6.0, fsm_commission: 12.0, salesman_commission: 60.0, referral_commission: 12.0 }
   ],
   prices: [],
   stocks: [
@@ -513,11 +513,148 @@ app.post('/api/auth/setup-password', async (req, res) => {
   });
 });
 
-// Login endpoint: Traditional Mobile Number or Email + Password
-app.post('/api/auth/login', async (req, res) => {
+// ============================================================================
+// LOGIN RATE LIMITING & BRUTE-FORCE PROTECTION
+// ============================================================================
+// 1. IP Burst Limit: Max 20 login requests per IP per 15 minutes.
+// 2. Account Lockout: Max 5 consecutive failed passwords per account (phone/email).
+//    Locks the account for 15 minutes after 5 failures.
+// 3. Reset on Success: Clears failed attempts upon successful authentication.
+// ============================================================================
+
+const loginAttemptsByAccount = new Map(); // key: loginId (lowercase) -> { count, lockedUntil, firstAttempt }
+const loginAttemptsByIp = new Map();      // key: clientIp -> { count, resetAt }
+
+const MAX_ACCOUNT_ATTEMPTS = 5;
+const ACCOUNT_LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes lockout
+const IP_BURST_MAX = 20;                   // max attempts per IP
+const IP_WINDOW_MS = 15 * 60 * 1000;       // 15-minute window
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || '127.0.0.1';
+}
+
+function checkLoginRateLimit(req, res, next) {
+  const now = Date.now();
+  const clientIp = getClientIp(req);
+  const loginId = (req.body.identifier || req.body.email || req.body.phone || '').trim().toLowerCase();
+
+  // 1. IP Burst Throttle
+  const ipRec = loginAttemptsByIp.get(clientIp);
+  if (ipRec) {
+    if (now < ipRec.resetAt) {
+      if (ipRec.count >= IP_BURST_MAX) {
+        const remainingMinutes = Math.ceil((ipRec.resetAt - now) / 60000);
+        res.setHeader('Retry-After', remainingMinutes * 60);
+        return res.status(429).json({
+          error: `Too many login requests from your network. Please wait ${remainingMinutes} minute(s) before trying again.`,
+          retryAfterMinutes: remainingMinutes
+        });
+      }
+    } else {
+      loginAttemptsByIp.set(clientIp, { count: 0, resetAt: now + IP_WINDOW_MS });
+    }
+  } else {
+    loginAttemptsByIp.set(clientIp, { count: 0, resetAt: now + IP_WINDOW_MS });
+  }
+
+  // 2. Account-Level Lockout
+  if (loginId) {
+    const accRec = loginAttemptsByAccount.get(loginId);
+    if (accRec && accRec.lockedUntil && now < accRec.lockedUntil) {
+      const remainingMinutes = Math.ceil((accRec.lockedUntil - now) / 60000);
+      res.setHeader('Retry-After', remainingMinutes * 60);
+      return res.status(429).json({
+        error: `Account temporarily locked due to ${MAX_ACCOUNT_ATTEMPTS} consecutive failed login attempts. Please try again in ${remainingMinutes} minute(s) or contact Super Admin.`,
+        retryAfterMinutes: remainingMinutes,
+        isLocked: true
+      });
+    }
+  }
+
+  next();
+}
+
+function recordFailedLogin(loginId, clientIp) {
+  const now = Date.now();
+
+  // 1. Increment IP usage
+  const ipRec = loginAttemptsByIp.get(clientIp) || { count: 0, resetAt: now + IP_WINDOW_MS };
+  ipRec.count += 1;
+  loginAttemptsByIp.set(clientIp, ipRec);
+
+  // 2. Increment Account failed attempts
+  if (!loginId) return { count: 1, remaining: MAX_ACCOUNT_ATTEMPTS - 1, locked: false };
+  const normalized = loginId.trim().toLowerCase();
+  let accRec = loginAttemptsByAccount.get(normalized);
+
+  if (!accRec || (accRec.lockedUntil && now >= accRec.lockedUntil)) {
+    accRec = { count: 1, lockedUntil: null, firstAttempt: now };
+  } else {
+    if (!accRec.lockedUntil && (now - accRec.firstAttempt > ACCOUNT_LOCKOUT_MS)) {
+      accRec = { count: 1, lockedUntil: null, firstAttempt: now };
+    } else {
+      accRec.count += 1;
+    }
+  }
+
+  if (accRec.count >= MAX_ACCOUNT_ATTEMPTS) {
+    accRec.lockedUntil = now + ACCOUNT_LOCKOUT_MS;
+    loginAttemptsByAccount.set(normalized, accRec);
+    return { count: accRec.count, remaining: 0, locked: true, lockoutMinutes: 15 };
+  }
+
+  loginAttemptsByAccount.set(normalized, accRec);
+  return {
+    count: accRec.count,
+    remaining: MAX_ACCOUNT_ATTEMPTS - accRec.count,
+    locked: false
+  };
+}
+
+function recordSuccessfulLogin(loginId, clientIp) {
+  if (loginId) {
+    loginAttemptsByAccount.delete(loginId.trim().toLowerCase());
+  }
+}
+
+function unlockAccount(user) {
+  if (!user) return;
+  if (user.email) loginAttemptsByAccount.delete(user.email.toLowerCase().trim());
+  if (user.phone) {
+    loginAttemptsByAccount.delete(user.phone.toLowerCase().trim());
+    const digits = user.phone.replace(/[^0-9]/g, '');
+    if (digits) loginAttemptsByAccount.delete(digits);
+  }
+}
+
+// Auto cleanup expired lockout records every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of loginAttemptsByAccount.entries()) {
+    if (val.lockedUntil && now >= val.lockedUntil) {
+      loginAttemptsByAccount.delete(key);
+    } else if (!val.lockedUntil && (now - val.firstAttempt > ACCOUNT_LOCKOUT_MS)) {
+      loginAttemptsByAccount.delete(key);
+    }
+  }
+  for (const [ip, val] of loginAttemptsByIp.entries()) {
+    if (now >= val.resetAt) {
+      loginAttemptsByIp.delete(ip);
+    }
+  }
+}, 10 * 60 * 1000);
+
+// Login endpoint: Traditional Mobile Number or Email + Password (Protected by Rate Limiter)
+app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
   const { email, phone, identifier, password } = req.body;
   const loginId = (identifier || email || phone || '').trim();
   const pass = (password || '').trim();
+  const clientIp = getClientIp(req);
 
   if (!loginId) {
     return res.status(400).json({ error: 'Please enter your mobile number or email address.' });
@@ -529,6 +666,9 @@ app.post('/api/auth/login', async (req, res) => {
   let matchedUser = await findUserByIdentifier(loginId);
 
   if (!matchedUser) {
+    // Record attempt on unrecognized login ID
+    recordFailedLogin(loginId, clientIp);
+
     // Check if account is still waiting for approval
     let pendingReq = null;
     if (isSupabaseConfigured) {
@@ -582,10 +722,25 @@ app.post('/api/auth/login', async (req, res) => {
   const expectedPassword = matchedUser.password || getDefaultPasswordForRole(matchedUser.role);
 
   if (pass !== expectedPassword) {
+    const attemptStatus = recordFailedLogin(loginId, clientIp);
+
+    if (attemptStatus.locked) {
+      res.setHeader('Retry-After', attemptStatus.lockoutMinutes * 60);
+      return res.status(429).json({
+        error: `Account temporarily locked due to ${MAX_ACCOUNT_ATTEMPTS} consecutive failed login attempts. Please try again in ${attemptStatus.lockoutMinutes} minutes or contact Super Admin.`,
+        isLocked: true,
+        retryAfterMinutes: attemptStatus.lockoutMinutes
+      });
+    }
+
     return res.status(401).json({
-      error: 'Invalid password. If you forgot your password, please contact Super Admin to retrieve it.'
+      error: `Invalid password. ${attemptStatus.remaining} attempt(s) remaining before temporary 15-minute lockout.`,
+      remainingAttempts: attemptStatus.remaining
     });
   }
+
+  // Reset rate limiting attempts on successful login
+  recordSuccessfulLogin(loginId, clientIp);
 
   const enrichedUser = {
     ...matchedUser,
@@ -937,6 +1092,7 @@ app.post('/api/users/:id/reset-password', async (req, res) => {
     return res.status(404).json({ error: 'User not found.' });
   }
 
+  unlockAccount(user);
   await logAudit(admin_id, admin_name, 'RESET_PASSWORD', 'users', id, `Super Admin updated password for ${user.name} (${user.email})`);
   return res.json({ success: true, message: `Password for ${user.name} has been updated to "${password.trim()}".` });
 });
@@ -1188,6 +1344,21 @@ function saveProductMeta() {
   }
 }
 
+function getProductWithMeta(productId) {
+  if (!productId) return null;
+  const prod = (mockDb.products || []).find(p => p.id === productId);
+  if (!prod) return null;
+  const meta = productMeta[prod.id] || productMeta[prod.sku] || {};
+  return {
+    ...prod,
+    base_price: meta.base_price !== undefined ? meta.base_price : (prod.base_price || 0.0),
+    store_admin_commission: meta.store_admin_commission !== undefined ? meta.store_admin_commission : (prod.store_admin_commission !== undefined ? prod.store_admin_commission : 0.0),
+    fsm_commission: meta.fsm_commission !== undefined ? meta.fsm_commission : (prod.fsm_commission !== undefined ? prod.fsm_commission : 0.0),
+    salesman_commission: meta.salesman_commission !== undefined ? meta.salesman_commission : (prod.salesman_commission !== undefined ? prod.salesman_commission : 0.0),
+    referral_commission: meta.referral_commission !== undefined ? meta.referral_commission : (prod.referral_commission !== undefined ? prod.referral_commission : 0.0),
+  };
+}
+
 // List Products
 app.get('/api/products', async (req, res) => {
   if (isSupabaseConfigured) {
@@ -1202,7 +1373,11 @@ app.get('/api/products', async (req, res) => {
           category: meta.category || p.category || 'General',
           base_price: meta.base_price !== undefined ? meta.base_price : (p.base_price || 0.0),
           min_stock_alert: meta.min_stock_alert !== undefined ? meta.min_stock_alert : (p.min_stock_alert || 20),
-          image_url: meta.image_url || p.image_url || null
+          image_url: meta.image_url || p.image_url || null,
+          store_admin_commission: meta.store_admin_commission !== undefined ? meta.store_admin_commission : (p.store_admin_commission !== undefined ? parseFloat(p.store_admin_commission) : 0.0),
+          fsm_commission: meta.fsm_commission !== undefined ? meta.fsm_commission : (p.fsm_commission !== undefined ? parseFloat(p.fsm_commission) : 0.0),
+          salesman_commission: meta.salesman_commission !== undefined ? meta.salesman_commission : (p.salesman_commission !== undefined ? parseFloat(p.salesman_commission) : 0.0),
+          referral_commission: meta.referral_commission !== undefined ? meta.referral_commission : (p.referral_commission !== undefined ? parseFloat(p.referral_commission) : 0.0)
         };
       });
       return res.json(enriched);
@@ -1217,7 +1392,11 @@ app.get('/api/products', async (req, res) => {
         is_active: p.is_active !== undefined ? p.is_active : (meta.is_active !== undefined ? meta.is_active : true),
         category: meta.category || p.category || 'General',
         base_price: meta.base_price !== undefined ? meta.base_price : (p.base_price || 0.0),
-        min_stock_alert: meta.min_stock_alert !== undefined ? meta.min_stock_alert : (p.min_stock_alert || 20)
+        min_stock_alert: meta.min_stock_alert !== undefined ? meta.min_stock_alert : (p.min_stock_alert || 20),
+        store_admin_commission: meta.store_admin_commission !== undefined ? meta.store_admin_commission : (p.store_admin_commission !== undefined ? p.store_admin_commission : 0.0),
+        fsm_commission: meta.fsm_commission !== undefined ? meta.fsm_commission : (p.fsm_commission !== undefined ? p.fsm_commission : 0.0),
+        salesman_commission: meta.salesman_commission !== undefined ? meta.salesman_commission : (p.salesman_commission !== undefined ? p.salesman_commission : 0.0),
+        referral_commission: meta.referral_commission !== undefined ? meta.referral_commission : (p.referral_commission !== undefined ? p.referral_commission : 0.0)
       };
     }));
   }
@@ -1225,10 +1404,18 @@ app.get('/api/products', async (req, res) => {
 
 // Add Product (Super Admin)
 app.post('/api/products', async (req, res) => {
-  const { name, sku, unit, category, base_price, min_stock_alert, image_url, is_active, admin_id, admin_name } = req.body;
+  const {
+    name, sku, unit, category, base_price, min_stock_alert, image_url, is_active,
+    store_admin_commission, fsm_commission, salesman_commission, referral_commission,
+    admin_id, admin_name
+  } = req.body;
   if (!name || !sku) return res.status(400).json({ error: 'Name and SKU are required' });
 
   const activeVal = is_active !== undefined ? is_active : true;
+  const storeAdminComm = store_admin_commission !== undefined ? parseFloat(store_admin_commission) : 0.0;
+  const fsmComm = fsm_commission !== undefined ? parseFloat(fsm_commission) : 0.0;
+  const salesmanComm = salesman_commission !== undefined ? parseFloat(salesman_commission) : 0.0;
+  const referralComm = referral_commission !== undefined ? parseFloat(referral_commission) : 0.0;
 
   if (isSupabaseConfigured) {
     try {
@@ -1240,7 +1427,11 @@ app.post('/api/products', async (req, res) => {
         category: category || 'General',
         base_price: base_price ? parseFloat(base_price) : 0.0,
         min_stock_alert: min_stock_alert ? parseInt(min_stock_alert) : 20,
-        image_url: image_url || null
+        image_url: image_url || null,
+        store_admin_commission: storeAdminComm,
+        fsm_commission: fsmComm,
+        salesman_commission: salesmanComm,
+        referral_commission: referralComm
       };
 
       const { data: fullData, error: fullErr } = await supabase.from('products').insert([fullPayload]).select().single();
@@ -1261,7 +1452,11 @@ app.post('/api/products', async (req, res) => {
         category: category || 'General',
         base_price: base_price ? parseFloat(base_price) : 0.0,
         min_stock_alert: min_stock_alert ? parseInt(min_stock_alert) : 20,
-        image_url: image_url || null
+        image_url: image_url || null,
+        store_admin_commission: storeAdminComm,
+        fsm_commission: fsmComm,
+        salesman_commission: salesmanComm,
+        referral_commission: referralComm
       };
       saveProductMeta();
 
@@ -1284,6 +1479,10 @@ app.post('/api/products', async (req, res) => {
       min_stock_alert: min_stock_alert ? parseInt(min_stock_alert) : 20,
       image_url: image_url || null,
       is_active: activeVal,
+      store_admin_commission: storeAdminComm,
+      fsm_commission: fsmComm,
+      salesman_commission: salesmanComm,
+      referral_commission: referralComm,
       created_at: new Date()
     };
     mockDb.products.push(newProduct);
@@ -1291,7 +1490,11 @@ app.post('/api/products', async (req, res) => {
       is_active: activeVal,
       category: newProduct.category,
       base_price: newProduct.base_price,
-      min_stock_alert: newProduct.min_stock_alert
+      min_stock_alert: newProduct.min_stock_alert,
+      store_admin_commission: storeAdminComm,
+      fsm_commission: fsmComm,
+      salesman_commission: salesmanComm,
+      referral_commission: referralComm
     };
     saveProductMeta();
     await logAudit(admin_id, admin_name, 'CREATE_PRODUCT', 'products', newProduct.id, `Created product ${name} (SKU: ${sku})`);
@@ -1302,7 +1505,11 @@ app.post('/api/products', async (req, res) => {
 // Update Product (Super Admin)
 app.put('/api/products/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, sku, unit, category, base_price, min_stock_alert, image_url, is_active, admin_id, admin_name } = req.body;
+  const {
+    name, sku, unit, category, base_price, min_stock_alert, image_url, is_active,
+    store_admin_commission, fsm_commission, salesman_commission, referral_commission,
+    admin_id, admin_name
+  } = req.body;
 
   if (isSupabaseConfigured) {
     try {
@@ -1314,6 +1521,10 @@ app.put('/api/products/:id', async (req, res) => {
       if (base_price !== undefined) updateData.base_price = parseFloat(base_price);
       if (min_stock_alert !== undefined) updateData.min_stock_alert = parseInt(min_stock_alert);
       if (image_url !== undefined) updateData.image_url = image_url;
+      if (store_admin_commission !== undefined) updateData.store_admin_commission = parseFloat(store_admin_commission);
+      if (fsm_commission !== undefined) updateData.fsm_commission = parseFloat(fsm_commission);
+      if (salesman_commission !== undefined) updateData.salesman_commission = parseFloat(salesman_commission);
+      if (referral_commission !== undefined) updateData.referral_commission = parseFloat(referral_commission);
 
       let dbProduct = { id };
       if (Object.keys(updateData).length > 0) {
@@ -1341,6 +1552,10 @@ app.put('/api/products/:id', async (req, res) => {
       if (base_price !== undefined) productMeta[id].base_price = parseFloat(base_price);
       if (min_stock_alert !== undefined) productMeta[id].min_stock_alert = parseInt(min_stock_alert);
       if (image_url !== undefined) productMeta[id].image_url = image_url;
+      if (store_admin_commission !== undefined) productMeta[id].store_admin_commission = parseFloat(store_admin_commission);
+      if (fsm_commission !== undefined) productMeta[id].fsm_commission = parseFloat(fsm_commission);
+      if (salesman_commission !== undefined) productMeta[id].salesman_commission = parseFloat(salesman_commission);
+      if (referral_commission !== undefined) productMeta[id].referral_commission = parseFloat(referral_commission);
       saveProductMeta();
 
       await logAudit(admin_id, admin_name, 'UPDATE_PRODUCT', 'products', id, `Updated product ${dbProduct.name || id} (Available: ${productMeta[id].is_active})`);
@@ -1363,13 +1578,28 @@ app.put('/api/products/:id', async (req, res) => {
     if (min_stock_alert !== undefined) prod.min_stock_alert = parseInt(min_stock_alert);
     if (image_url !== undefined) prod.image_url = image_url;
     if (is_active !== undefined) prod.is_active = is_active;
+    if (store_admin_commission !== undefined) prod.store_admin_commission = parseFloat(store_admin_commission);
+    if (fsm_commission !== undefined) prod.fsm_commission = parseFloat(fsm_commission);
+    if (salesman_commission !== undefined) prod.salesman_commission = parseFloat(salesman_commission);
+    if (referral_commission !== undefined) prod.referral_commission = parseFloat(referral_commission);
 
     productMeta[id] = productMeta[id] || {};
     if (is_active !== undefined) productMeta[id].is_active = is_active;
+    if (category !== undefined) productMeta[id].category = category;
+    if (base_price !== undefined) productMeta[id].base_price = parseFloat(base_price);
+    if (min_stock_alert !== undefined) productMeta[id].min_stock_alert = parseInt(min_stock_alert);
+    if (image_url !== undefined) productMeta[id].image_url = image_url;
+    if (store_admin_commission !== undefined) productMeta[id].store_admin_commission = parseFloat(store_admin_commission);
+    if (fsm_commission !== undefined) productMeta[id].fsm_commission = parseFloat(fsm_commission);
+    if (salesman_commission !== undefined) productMeta[id].salesman_commission = parseFloat(salesman_commission);
+    if (referral_commission !== undefined) productMeta[id].referral_commission = parseFloat(referral_commission);
     saveProductMeta();
 
     await logAudit(admin_id, admin_name, 'UPDATE_PRODUCT', 'products', id, `Updated product ${prod.name}`);
-    return res.json(prod);
+    return res.json({
+      ...prod,
+      ...productMeta[id]
+    });
   }
 });
 
@@ -1689,6 +1919,75 @@ app.get('/api/stock/intakes', async (req, res) => {
   return res.json(list);
 });
 
+// Helper function to credit dynamic per-product commissions on completed stock transfers
+function processTransferCommission(transfer) {
+  if (!transfer || !transfer.quantity || transfer.status !== 'completed') return;
+  const users = mockDb.users || [];
+  const senderUser = users.find(u => u.id === transfer.from_id);
+  const recipientUser = users.find(u => u.id === transfer.to_id);
+  const product = getProductWithMeta(transfer.product_id);
+  if (!product) return;
+
+  if (!mockDb.workforceCommissions) mockDb.workforceCommissions = [];
+  const alreadyCredited = mockDb.workforceCommissions.some(c => c.transfer_id === transfer.id);
+  if (alreadyCredited) return;
+
+  const isSenderStoreAdmin = (senderUser && senderUser.role === 'store_admin') || (mockDb.warehouses && mockDb.warehouses.some(w => w.id === transfer.from_id));
+  const isRecipientFsm = recipientUser && recipientUser.role === 'field_sales_manager';
+  const isSenderFsm = senderUser && senderUser.role === 'field_sales_manager';
+  const isRecipientSalesman = recipientUser && recipientUser.role === 'salesman';
+
+  // 1. Store Admin -> FSM: Store Admin earns product.store_admin_commission
+  if (isSenderStoreAdmin && isRecipientFsm) {
+    const rate = Number(product.store_admin_commission) || 0.0;
+    const amount = transfer.quantity * rate;
+    if (amount > 0) {
+      mockDb.workforceCommissions.unshift({
+        id: `sa_comm_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+        role: 'store_admin',
+        type: 'store_admin_dispatch',
+        user_id: transfer.from_id,
+        user_name: senderUser?.name || 'Store Admin',
+        recipient_id: transfer.to_id,
+        recipient_name: recipientUser?.name || 'Field Sales Manager',
+        transfer_id: transfer.id,
+        product_id: transfer.product_id,
+        product_name: product.name,
+        quantity: transfer.quantity,
+        rate_per_unit: rate,
+        commission_amount: amount,
+        status: 'unlocked',
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+
+  // 2. FSM -> Salesman: FSM earns product.fsm_commission
+  if (isSenderFsm && isRecipientSalesman) {
+    const rate = Number(product.fsm_commission) || 0.0;
+    const amount = transfer.quantity * rate;
+    if (amount > 0) {
+      mockDb.workforceCommissions.unshift({
+        id: `fsm_comm_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+        role: 'field_sales_manager',
+        type: 'fsm_allocation',
+        user_id: transfer.from_id,
+        user_name: senderUser?.name || 'Field Sales Manager',
+        recipient_id: transfer.to_id,
+        recipient_name: recipientUser?.name || 'Salesman',
+        transfer_id: transfer.id,
+        product_id: transfer.product_id,
+        product_name: product.name,
+        quantity: transfer.quantity,
+        rate_per_unit: rate,
+        commission_amount: amount,
+        status: 'unlocked',
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+}
+
 // Transfer stock (Store Admin -> FSM, FSM -> Salesman)
 app.post('/api/stock/transfer', async (req, res) => {
   const { from_id, to_id, product_id, quantity, status = 'completed' } = req.body;
@@ -1781,6 +2080,10 @@ app.post('/api/stock/transfer', async (req, res) => {
       }]).select().single();
       if (trErr) throw trErr;
 
+      if (transferStatus === 'completed') {
+        processTransferCommission(transferData);
+      }
+
       return res.json({ message: 'Stock transfer recorded successfully', transfer: transferData });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -1865,6 +2168,10 @@ app.post('/api/stock/transfer', async (req, res) => {
     };
     mockDb.transfers.unshift(newTransfer);
 
+    if (transferStatus === 'completed') {
+      processTransferCommission(newTransfer);
+    }
+
     return res.json({ message: 'Stock transfer recorded successfully', transfer: newTransfer });
   }
 });
@@ -1938,6 +2245,7 @@ app.put('/api/stock/transfers/:id/accept', async (req, res) => {
       }
 
       await logAudit(user_id || transfer.to_id, actorRole, 'ACCEPT_STOCK_TRANSFER', 'stock_transfers', id, `Confirmed receipt of ${transfer.quantity} units`);
+      processTransferCommission(updatedTr || transfer);
       return res.json({ message: 'Transfer accepted successfully. Stock added to inventory.', transfer: updatedTr });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -1988,6 +2296,7 @@ app.put('/api/stock/transfers/:id/accept', async (req, res) => {
     }
 
     await logAudit(user_id || transfer.to_id, actorRole, 'ACCEPT_STOCK_TRANSFER', 'stock_transfers', id, `Confirmed receipt of ${transfer.quantity} units`);
+    processTransferCommission(transfer);
     return res.json({ message: 'Transfer accepted successfully. Stock added to inventory.', transfer });
   }
 });
@@ -2738,90 +3047,102 @@ app.get('/api/reports/summary', async (req, res) => {
 
 // --- SALES ---
 
-// Helper function to process workforce referral commissions and unlock quota conditions
-async function processWorkforceCommissionForSale(salesman_id, saleQty, saleId) {
+// Helper function to process dynamic product direct and referral commissions for a sale
+async function processWorkforceCommissionForSale(salesman_id, saleQty, saleId, product_id) {
   if (!salesman_id || saleQty <= 0) return;
 
   const users = mockDb.users || [];
   const seller = users.find(u => u.id === salesman_id);
-  const rules = mockDb.referral_rules || { commission_per_bottle: 1.00, min_sales_quota: 5, is_quota_condition_active: true };
+  const product = getProductWithMeta(product_id);
 
-  // 1. If seller has a direct referrer, calculate downline commission for that referrer
-  if (seller && seller.referrer_id && rules.is_active !== false) {
-    const referrer = users.find(u => u.id === seller.referrer_id);
-    if (referrer) {
-      const rate = Number(rules.commission_per_bottle) || 1.00;
-      const quota = Number(rules.min_sales_quota) || 5;
-      const isQuotaActive = rules.is_quota_condition_active !== false;
+  if (!mockDb.workforceCommissions) mockDb.workforceCommissions = [];
 
-      // Calculate referrer's sales today
-      const referrerSales = (mockDb.sales || []).filter(s => s.salesman_id === seller.referrer_id);
-      const referrerBottlesToday = referrerSales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-      const isQualified = !isQuotaActive || (referrerBottlesToday >= quota);
-      const commAmount = saleQty * rate;
-
-      const newComm = {
-        id: `w_comm_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
-        referrer_id: seller.referrer_id,
-        referrer_name: referrer.name,
-        seller_id: seller.id,
-        seller_name: seller.name,
-        bottles_sold: saleQty,
-        rate_per_bottle: rate,
-        commission_amount: commAmount,
-        status: isQualified ? 'unlocked' : 'quota_pending',
-        referrer_sales_today: referrerBottlesToday,
-        min_quota_required: quota,
+  // 1. Direct Commission for Salesman (selling to customer)
+  if (seller && product) {
+    const directRate = Number(product.salesman_commission) || 0.0;
+    const directAmount = saleQty * directRate;
+    if (directAmount > 0) {
+      const directComm = {
+        id: `dir_comm_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+        role: 'salesman',
+        type: 'direct_sale',
+        user_id: seller.id,
+        user_name: seller.name,
         sale_id: saleId,
-        created_at: new Date().toISOString(),
-        paid_at: null
+        product_id: product.id,
+        product_name: product.name,
+        bottles_sold: saleQty,
+        rate_per_bottle: directRate,
+        commission_amount: directAmount,
+        status: 'unlocked',
+        created_at: new Date().toISOString()
       };
-
-      if (!mockDb.workforceCommissions) mockDb.workforceCommissions = [];
-      mockDb.workforceCommissions.unshift(newComm);
+      mockDb.workforceCommissions.unshift(directComm);
 
       if (isSupabaseConfigured) {
         try {
           await supabase.from('workforce_commissions').insert([{
-            referrer_id: seller.referrer_id,
-            referrer_name: referrer.name,
             seller_id: seller.id,
             seller_name: seller.name,
             sale_id: saleId || null,
             bottles_sold: saleQty,
-            rate_per_bottle: rate,
-            commission_amount: commAmount,
-            status: newComm.status,
-            referrer_sales_today: referrerBottlesToday,
-            min_quota_required: quota
+            rate_per_bottle: directRate,
+            commission_amount: directAmount,
+            status: 'unlocked'
           }]);
         } catch (e) {
-          console.warn('workforce_commissions Supabase insert notice:', e.message);
+          console.warn('workforce_commissions direct sale insert notice:', e.message);
         }
       }
     }
   }
 
-  // 2. Check if this sale allows the seller themselves to meet the quota and unlocks their pending commissions
-  const sellerSales = (mockDb.sales || []).filter(s => s.salesman_id === salesman_id);
-  const sellerBottlesToday = sellerSales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-  const quota = Number(rules.min_sales_quota) || 5;
+  // 2. Direct Referral Bonus (Strictly 1-Level: Salesman A refers Salesman B -> Salesman A gets referral commission)
+  if (seller && seller.referrer_id && product) {
+    const referrer = users.find(u => u.id === seller.referrer_id);
+    if (referrer && referrer.role === 'salesman') {
+      const referralRate = Number(product.referral_commission) || 0.0;
+      const commAmount = saleQty * referralRate;
 
-  if (sellerBottlesToday >= quota && mockDb.workforceCommissions) {
-    mockDb.workforceCommissions.forEach(comm => {
-      if (comm.referrer_id === salesman_id && comm.status === 'quota_pending') {
-        comm.status = 'unlocked';
-      }
-    });
+      if (commAmount > 0) {
+        const newComm = {
+          id: `w_comm_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+          role: 'salesman',
+          type: 'referral_bonus',
+          referrer_id: seller.referrer_id,
+          referrer_name: referrer.name,
+          seller_id: seller.id,
+          seller_name: seller.name,
+          bottles_sold: saleQty,
+          rate_per_bottle: referralRate,
+          commission_amount: commAmount,
+          status: 'unlocked',
+          sale_id: saleId,
+          product_id: product.id,
+          product_name: product.name,
+          created_at: new Date().toISOString(),
+          paid_at: null
+        };
 
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.from('workforce_commissions')
-          .update({ status: 'unlocked' })
-          .eq('referrer_id', salesman_id)
-          .eq('status', 'quota_pending');
-      } catch (e) {
-        console.warn('workforce_commissions unlock notice:', e.message);
+        mockDb.workforceCommissions.unshift(newComm);
+
+        if (isSupabaseConfigured) {
+          try {
+            await supabase.from('workforce_commissions').insert([{
+              referrer_id: seller.referrer_id,
+              referrer_name: referrer.name,
+              seller_id: seller.id,
+              seller_name: seller.name,
+              sale_id: saleId || null,
+              bottles_sold: saleQty,
+              rate_per_bottle: referralRate,
+              commission_amount: commAmount,
+              status: 'unlocked'
+            }]);
+          } catch (e) {
+            console.warn('workforce_commissions Supabase insert notice:', e.message);
+          }
+        }
       }
     }
   }
@@ -2946,7 +3267,7 @@ app.post('/api/sales', async (req, res) => {
       }
 
       // Process workforce referral commission for this sale
-      await processWorkforceCommissionForSale(salesman_id, saleQty, saleData.id);
+      await processWorkforceCommissionForSale(salesman_id, saleQty, saleData.id, product_id);
 
       const roleLabel = warehouse_id ? 'Store Admin' : 'Seller';
       await logAudit(salesman_id, roleLabel, 'SALE_COMPLETED', 'sales', saleData.id, `Completed ${customer_type || 'retail'} sale of ${saleQty} units for ₹${amount} (${payment_method})`);
@@ -2986,7 +3307,7 @@ app.post('/api/sales', async (req, res) => {
       };
       mockDb.sales.unshift(newSale);
 
-      await processWorkforceCommissionForSale(salesman_id, saleQty, newSale.id);
+      await processWorkforceCommissionForSale(salesman_id, saleQty, newSale.id, product_id);
 
       const roleLabel = warehouse_id ? 'Store Admin' : 'Seller';
       await logAudit(salesman_id, roleLabel, 'SALE_COMPLETED', 'sales', newSale.id, `Completed ${customer_type || 'retail'} sale of ${saleQty} units for ₹${amount} (${payment_method})`);
@@ -3040,7 +3361,7 @@ app.post('/api/sales', async (req, res) => {
     mockDb.sales.unshift(newSale);
 
     // Process workforce referral commission for this sale
-    await processWorkforceCommissionForSale(salesman_id, saleQty, newSale.id);
+    await processWorkforceCommissionForSale(salesman_id, saleQty, newSale.id, product_id);
 
     const roleLabel = warehouse_id ? 'Store Admin' : 'Seller';
     await logAudit(salesman_id, roleLabel, 'SALE_COMPLETED', 'sales', newSale.id, `Completed ${customer_type || 'retail'} sale of ${saleQty} units for ₹${amount} (${payment_method})`);
@@ -3439,44 +3760,30 @@ app.get('/api/salesman/earnings/:salesman_id', (req, res) => {
   const user = (mockDb.users || []).find(u => u.id === salesman_id);
   const todaySales = (mockDb.sales || []).filter(s => s.salesman_id === salesman_id);
   const soldBottlesToday = todaySales.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
-  const commissionRate = 30; // ₹30 per bottle base direct sale commission
-  const commissionEarned = soldBottlesToday * commissionRate;
 
-  const rules = mockDb.referral_rules || { commission_per_bottle: 1.00, min_sales_quota: 5, is_quota_condition_active: true };
-  const minQuota = Number(rules.min_sales_quota) || 5;
-  const isQuotaActive = rules.is_quota_condition_active !== false;
-  const isQualified = !isQuotaActive || (soldBottlesToday >= minQuota);
-  const bottlesNeeded = isQualified ? 0 : Math.max(0, minQuota - soldBottlesToday);
+  // Dynamic direct sale commissions from products sold
+  let directCommissionEarned = 0;
+  todaySales.forEach(s => {
+    const prod = getProductWithMeta(s.product_id);
+    const rate = Number(prod?.salesman_commission) || 0.0;
+    directCommissionEarned += (Number(s.quantity) || 0) * rate;
+  });
 
-  // Workforce commissions earned by this salesman from downline referrals
-  const myCommissions = (mockDb.workforceCommissions || []).filter(c => c.referrer_id === salesman_id);
-  const downlineBottles = myCommissions.reduce((sum, c) => sum + (Number(c.bottles_sold) || 0), 0);
-  const unlockedReferralEarned = myCommissions
+  // Dynamic referral commissions from direct downline referrals (Strictly 1-Level)
+  const myReferralComms = (mockDb.workforceCommissions || []).filter(c => c.referrer_id === salesman_id && c.type === 'referral_bonus');
+  const downlineBottles = myReferralComms.reduce((sum, c) => sum + (Number(c.bottles_sold) || 0), 0);
+  const unlockedReferralEarned = myReferralComms
     .filter(c => c.status === 'unlocked' || c.status === 'paid')
     .reduce((sum, c) => sum + (Number(c.commission_amount) || 0), 0);
-  const quotaPendingReferralEarned = myCommissions
-    .filter(c => c.status === 'quota_pending')
-    .reduce((sum, c) => sum + (Number(c.commission_amount) || 0), 0);
-
-  const referralRate = Number(rules.commission_per_bottle) || 1.00;
-  const totalEarned = commissionEarned + unlockedReferralEarned;
+  const totalEarned = directCommissionEarned + unlockedReferralEarned;
 
   return res.json({
     salesman_id,
     salesman_name: user ? user.name : 'Salesman',
     is_on_duty: user ? (user.is_on_duty ?? true) : true,
     sold_bottles_today: soldBottlesToday,
-    commission_rate: commissionRate,
-    commission_earned: commissionEarned,
-    // Workforce referral & qualification details
-    min_sales_quota: minQuota,
-    is_quota_condition_active: isQuotaActive,
-    is_qualified: isQualified,
-    bottles_needed_to_qualify: bottlesNeeded,
+    commission_earned: directCommissionEarned,
     downline_bottles_sold: downlineBottles,
-    referral_rate: referralRate,
-    unlocked_referral_earned: unlockedReferralEarned,
-    quota_pending_referral_earned: quotaPendingReferralEarned,
     referral_earned: unlockedReferralEarned,
     referral_bottles: downlineBottles,
     total_earned: totalEarned,
@@ -3724,17 +4031,41 @@ const approveSettlementHandler = async (req, res) => {
 app.put('/api/settlements/:id/approve', approveSettlementHandler);
 app.put('/api/settlements/:id/accept', approveSettlementHandler);
 
-app.get('/api/settlements/:salesman_id', (req, res) => {
+async function getDefaultProductUnitPrice() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data } = await supabase.from('products').select('id, sku, base_price').limit(1);
+      if (data && data.length > 0) {
+        const p = data[0];
+        const meta = productMeta[p.id] || productMeta[p.sku] || {};
+        const price = meta.base_price !== undefined ? meta.base_price : (p.base_price || 0.0);
+        if (price > 0) return Number(price);
+      }
+    } catch (e) {
+      console.warn('Error fetching default product price from supabase:', e.message);
+    }
+  }
+  const first = mockDb.products?.[0];
+  if (first) {
+    const meta = productMeta[first.id] || productMeta[first.sku] || {};
+    const price = meta.base_price !== undefined ? meta.base_price : (first.base_price || 0.0);
+    if (price > 0) return Number(price);
+  }
+  return 0.0;
+}
+
+app.get('/api/settlements/:salesman_id', async (req, res) => {
   const { salesman_id } = req.params;
   const list = (mockDb.settlements || []).filter(s => s.salesman_id === salesman_id);
   const user = mockDb.users.find(u => u.id === salesman_id);
   const currentStock = user ? (Number(user.current_stock) || 0) : 0;
+  const dynamicUnitPrice = await getDefaultProductUnitPrice();
   const todayDispatch = {
     date_label: 'Today',
     assigned_by: 'Field Sales Manager',
     bottles_dispatched: currentStock,
-    unit_price: 351,
-    total_value: currentStock * 351,
+    unit_price: dynamicUnitPrice,
+    total_value: currentStock * dynamicUnitPrice,
     status: 'pending',
     verified: currentStock > 0
   };
@@ -3770,7 +4101,8 @@ app.post('/api/settlements', async (req, res) => {
   const sold = Number(bottles_sold) || 0;
   const remaining = Number(remaining_qty !== undefined ? remaining_qty : unsold_bottles) || 0;
   const damaged = Number(damaged_qty) || 0;
-  const price = Number(unit_price) || 351;
+  const defaultUnitPrice = await getDefaultProductUnitPrice();
+  const price = Number(unit_price) || defaultUnitPrice;
   const cash = Number(cash_received !== undefined ? cash_received : cash_collected) || 0;
   const online = Number(online_payment) || 0;
   const totalPaid = cash + online;
@@ -3925,8 +4257,11 @@ app.get('/api/fsm/dashboard/:fsm_id', async (req, res) => {
   const supervised = (mockDb.users || []).filter(u => u.parent_id === fsmId && u.role === 'salesman');
   const totalBottlesSold = supervised.reduce((sum, s) => sum + (Number(s.sold_today) || 0), 0);
   const totalAllocated = supervised.reduce((sum, s) => sum + (Number(s.current_stock) || 0), 0);
-  const ratePerBottle = 10;
-  const todayEarned = totalBottlesSold * ratePerBottle;
+  
+  // Dynamic FSM commissions from stock allocations to salesmen
+  const fsmComms = (mockDb.workforceCommissions || []).filter(c => c.user_id === fsmId && c.role === 'field_sales_manager');
+  const todayEarned = fsmComms.reduce((sum, c) => sum + (Number(c.commission_amount) || 0), 0);
+  const totalUnitsAllocated = fsmComms.reduce((sum, c) => sum + (Number(c.quantity) || 0), 0);
 
   // Compute top performers dynamically from supervised team
   const sortedSalesmen = [...supervised].sort((a, b) => (b.sold_today || 0) - (a.sold_today || 0));
@@ -3941,7 +4276,7 @@ app.get('/api/fsm/dashboard/:fsm_id', async (req, res) => {
     earnings: {
       today_earned: todayEarned,
       bottles_sold: totalBottlesSold,
-      rate_per_bottle: ratePerBottle
+      units_allocated: totalUnitsAllocated
     },
     team_sales: {
       bottles: totalBottlesSold
@@ -3954,6 +4289,20 @@ app.get('/api/fsm/dashboard/:fsm_id', async (req, res) => {
     },
     top_performers: topPerformers,
     available_depot_stock: hub.depot_stock || 0
+  });
+});
+
+// Store Admin Earnings Breakdown (Dynamic commissions from stock transfers to FSMs)
+app.get('/api/store-admin/earnings/:user_id', (req, res) => {
+  const { user_id } = req.params;
+  const storeComms = (mockDb.workforceCommissions || []).filter(c => c.user_id === user_id && c.role === 'store_admin');
+  const todayEarned = storeComms.reduce((sum, c) => sum + (Number(c.commission_amount) || 0), 0);
+  const totalDispatched = storeComms.reduce((sum, c) => sum + (Number(c.quantity) || 0), 0);
+  return res.json({
+    store_admin_id: user_id,
+    today_earned: todayEarned,
+    units_dispatched: totalDispatched,
+    commissions: storeComms
   });
 });
 
@@ -4109,11 +4458,12 @@ app.post('/api/fsm/warehouse-return-qr', async (req, res) => {
   const { fsm_id, quantity } = req.body || {};
   const returnQty = Number(quantity) || 500;
   const token = `WR-RET-${Math.floor(10000 + Math.random() * 90000)}`;
+  const defaultUnitPrice = await getDefaultProductUnitPrice();
   const result = {
     qr_token: token,
     fsm_id: fsm_id || 'u3',
     quantity: returnQty,
-    inventory_value: returnQty * 351,
+    inventory_value: returnQty * defaultUnitPrice,
     status: 'authorized',
     expires_at: new Date(Date.now() + 86400000).toISOString(),
     created_at: new Date().toISOString()

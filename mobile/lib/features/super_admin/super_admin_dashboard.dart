@@ -735,6 +735,18 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final alertCtrl = TextEditingController(
       text: editProduct?['min_stock_alert']?.toString() ?? '20',
     );
+    final storeAdminCommCtrl = TextEditingController(
+      text: editProduct?['store_admin_commission']?.toString() ?? '5.0',
+    );
+    final fsmCommCtrl = TextEditingController(
+      text: editProduct?['fsm_commission']?.toString() ?? '10.0',
+    );
+    final salesmanCommCtrl = TextEditingController(
+      text: editProduct?['salesman_commission']?.toString() ?? '50.0',
+    );
+    final referralCommCtrl = TextEditingController(
+      text: editProduct?['referral_commission']?.toString() ?? '10.0',
+    );
     bool isAvailable = editProduct?['is_active'] != false;
 
     showDialog(
@@ -782,6 +794,71 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                     labelText: 'Low Stock Alert Threshold',
                   ),
                   keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 14),
+                // Dynamic Per-Product Commission Rules Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blueGrey.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.blueGrey.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.monetization_on_outlined, size: 18, color: AppColors.primary),
+                          SizedBox(width: 6),
+                          Text(
+                            'COMMISSION RULES (Per Unit)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: storeAdminCommCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Store Admin Commission (₹)',
+                          helperText: 'Earned when Store Admin dispatches to FSM',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: fsmCommCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'FSM Commission (₹)',
+                          helperText: 'Earned when FSM allocates to Salesman',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: salesmanCommCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Salesman Direct Commission (₹)',
+                          helperText: 'Earned when Salesman sells to customer',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: referralCommCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Salesman Referral Bonus (₹)',
+                          helperText: 'Earned by direct referrer on downline sale (1-level)',
+                          isDense: true,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Container(
@@ -877,6 +954,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   'unit': unitCtrl.text.trim(),
                   'base_price': double.tryParse(basePriceCtrl.text) ?? 0.0,
                   'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
+                  'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
+                  'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
+                  'salesman_commission': double.tryParse(salesmanCommCtrl.text) ?? 0.0,
+                  'referral_commission': double.tryParse(referralCommCtrl.text) ?? 0.0,
                   'is_active': isAvailable,
                   'admin_id': AppState.currentUser?['id'],
                   'admin_name': AppState.currentUser?['name'],
@@ -913,6 +994,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                           double.tryParse(basePriceCtrl.text) ?? 0.0;
                       editProduct['min_stock_alert'] =
                           int.tryParse(alertCtrl.text) ?? 20;
+                      editProduct['store_admin_commission'] =
+                          double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
+                      editProduct['fsm_commission'] =
+                          double.tryParse(fsmCommCtrl.text) ?? 0.0;
+                      editProduct['salesman_commission'] =
+                          double.tryParse(salesmanCommCtrl.text) ?? 0.0;
+                      editProduct['referral_commission'] =
+                          double.tryParse(referralCommCtrl.text) ?? 0.0;
                       editProduct['is_active'] = isAvailable;
                     } else {
                       _products.add({
@@ -924,6 +1013,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                         'base_price':
                             double.tryParse(basePriceCtrl.text) ?? 0.0,
                         'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
+                        'store_admin_commission':
+                            double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
+                        'fsm_commission':
+                            double.tryParse(fsmCommCtrl.text) ?? 0.0,
+                        'salesman_commission':
+                            double.tryParse(salesmanCommCtrl.text) ?? 0.0,
+                        'referral_commission':
+                            double.tryParse(referralCommCtrl.text) ?? 0.0,
                         'is_active': isAvailable,
                       });
                     }
@@ -2257,6 +2354,24 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     );
   }
 
+  Widget _commissionBadge(String label, String value, MaterialColor color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.shade50,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.shade200, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$label: ', style: TextStyle(fontSize: 10, color: color.shade800, fontWeight: FontWeight.w500)),
+          Text(value, style: TextStyle(fontSize: 10.5, color: color.shade900, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
   // --- MODULE 3: PRODUCT CATALOG & TIERED PRICING ---
   Widget _buildProductsModule() {
     final availableCount = _products
@@ -2649,6 +2764,19 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Dynamic Per-Product Commission Chips
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  _commissionBadge('Store Admin', '₹${p['store_admin_commission'] ?? 0}', Colors.teal),
+                                  _commissionBadge('FSM', '₹${p['fsm_commission'] ?? 0}', Colors.indigo),
+                                  _commissionBadge('Salesman', '₹${p['salesman_commission'] ?? 0}', Colors.deepOrange),
+                                  _commissionBadge('Referral', '₹${p['referral_commission'] ?? 0}', Colors.purple),
                                 ],
                               ),
                               const SizedBox(height: 10),

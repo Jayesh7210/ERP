@@ -83,10 +83,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     'total_earned': 0.0,
     'commission_earned': 0.0,
     'sold_bottles_today': 0,
-    'commission_rate': 30,
     'referral_earned': 0.0,
     'referral_bottles': 0,
-    'referral_rate': 1,
     'monthly_earnings': 0,
     'monthly_bottles_sold': 0,
   };
@@ -96,7 +94,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   int _totalDispatchedBottles = 10;
   int _currentStock = 10;
   int _soldToday = 0;
-  final double _bottleUnitPrice = 351.0;
+  double? _bottleUnitPrice;
+  double get _unitPrice => _bottleUnitPrice ?? 0.0;
   late TextEditingController _cashHandoverCtrl;
   late TextEditingController _onlinePaymentCtrl;
   late TextEditingController _soldBottlesInputCtrl;
@@ -176,12 +175,34 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       _loadReferrals(),
       _loadCustomers(),
       _loadStockTransfers(),
+      _loadProductPricing(),
       _restoreOfflineSalesState(),
     ]);
     if (mounted) setState(() => _isLoading = false);
 
     // Auto-sync pending offline sales in background
     _syncPendingSales(silent: true);
+  }
+
+  Future<void> _loadProductPricing() async {
+    try {
+      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body);
+        if (list is List && list.isNotEmpty) {
+          final first = list.first;
+          final basePrice = (first['base_price'] as num?)?.toDouble();
+          if (basePrice != null && basePrice > 0) {
+            if (mounted) {
+              setState(() {
+                _bottleUnitPrice = basePrice;
+                _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
+              });
+            }
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   /// Restore any unsynced offline sales into the local settlement counter
@@ -193,7 +214,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         setState(() {
           _settlementSoldBottles = (_settlementSoldBottles + offlineQty).clamp(0, _totalDispatchedBottles);
           _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-          _cashHandoverCtrl.text = '${(_settlementSoldBottles * _bottleUnitPrice).toInt()}';
+          _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
         });
       }
     } catch (_) {}
@@ -216,6 +237,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       if (mounted) {
         if (res.synced > 0) {
           await _loadEarnings();
+          if (!mounted) return;
           if (!silent) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -259,10 +281,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           'total_earned': 0.0,
           'commission_earned': 0.0,
           'sold_bottles_today': 0,
-          'commission_rate': 30,
           'referral_earned': 0.0,
           'referral_bottles': 0,
-          'referral_rate': 1,
           'monthly_earnings': 0,
           'monthly_bottles_sold': 0,
         };
@@ -275,6 +295,13 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/settlements/$_salesmanId'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        final todayData = data['today'];
+        if (todayData != null && todayData['unit_price'] != null) {
+          final p = (todayData['unit_price'] as num).toDouble();
+          if (p > 0) {
+            _bottleUnitPrice = p;
+          }
+        }
         setState(() {
           _settlementHistory = List<Map<String, dynamic>>.from(data['history'] ?? []);
         });
@@ -334,7 +361,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
               _stockHistory = completed.map((t) => {
                 'date': t['created_at'] != null ? t['created_at'].toString().split('T').first : 'Today',
                 'bottles': t['quantity'] ?? 10,
-                'amount': (((t['quantity'] as num?)?.toInt() ?? 10) * _bottleUnitPrice).toInt(),
+                'amount': (((t['quantity'] as num?)?.toInt() ?? 10) * _unitPrice).toInt(),
                 'status': 'SETTLED',
               }).toList();
             });
@@ -443,7 +470,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     final int damaged = _hasDamagedBottles ? _damagedBottles : 0;
     final int sold = _settlementSoldBottles;
     final int remaining = (heldStock - sold - damaged).clamp(0, heldStock);
-    final int soldAmt = (sold * _bottleUnitPrice).toInt();
+    final int soldAmt = (sold * _unitPrice).toInt();
     final int cash = double.tryParse(_cashHandoverCtrl.text.trim())?.toInt() ?? 0;
     final int online = double.tryParse(_onlinePaymentCtrl.text.trim())?.toInt() ?? 0;
 
@@ -467,7 +494,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           'damaged_qty': damaged,
           'damage_notes': _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
           'damage_image_base64': _damageImageBase64,
-          'unit_price': _bottleUnitPrice,
+          'unit_price': _unitPrice,
           'cash_received': cash,
           'online_payment': online,
           'security_pin': securityPin,
@@ -906,7 +933,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       builder: (ctx) => StatefulBuilder(
         builder: (modalCtx, setModalState) {
           final qty = int.tryParse(_saleQtyCtrl.text) ?? 1;
-          final totalAmt = qty * _bottleUnitPrice;
+          final totalAmt = qty * _unitPrice;
 
           return Padding(
             padding: EdgeInsets.only(left: 20, right: 20, top: 20, bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 20),
@@ -980,7 +1007,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             Text('Retail Price (Super Admin):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.primary)),
                           ],
                         ),
-                        Text('₹$_bottleUnitPrice / btl', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ClientColors.textDark)),
+                        _bottleUnitPrice != null
+                            ? Text('₹$_bottleUnitPrice / btl', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ClientColors.textDark))
+                            : const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
                       ],
                     ),
                   ),
@@ -1080,7 +1109,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     setState(() {
       _settlementSoldBottles = (_settlementSoldBottles + qty).clamp(0, _totalDispatchedBottles);
       _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-      _cashHandoverCtrl.text = '${(_settlementSoldBottles * _bottleUnitPrice).toInt()}';
+      _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
     });
 
     if (mounted) {
@@ -1132,7 +1161,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 ),
               _infoRow('Receipt ID:', receiptId),
               _infoRow('Bottles Sold:', '$qty Bottles'),
-              _infoRow('Unit Price:', '₹$_bottleUnitPrice'),
+              _infoRow('Unit Price:', _bottleUnitPrice != null ? '₹$_bottleUnitPrice' : 'Loading...'),
               _infoRow('Total Collected:', '₹$totalAmt'),
               _infoRow('Payment Mode:', _salePaymentMode.toUpperCase()),
               _infoRow('Sync Status:', isOffline ? '⚡ Queued Locally' : '✅ Live on Server'),
@@ -1545,7 +1574,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             ),
                             const SizedBox(height: 3),
                             Text('₹${commission.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text('${_earningsData['sold_bottles_today'] ?? _soldToday} btls × ₹${_earningsData['commission_rate'] ?? 30}', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                            Text('${_earningsData['sold_bottles_today'] ?? _soldToday} bottles sold today', style: const TextStyle(color: Colors.white60, fontSize: 10)),
                           ],
                         ),
                       ),
@@ -1564,7 +1593,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             ),
                             const SizedBox(height: 3),
                             Text('₹${referralEarned.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text('${_earningsData['downline_bottles_sold'] ?? _earningsData['referral_bottles'] ?? 0} btls × ₹${_earningsData['referral_rate'] ?? 1}', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                            Text('${_earningsData['downline_bottles_sold'] ?? _earningsData['referral_bottles'] ?? 0} bottles sold by referrals', style: const TextStyle(color: Colors.white60, fontSize: 10)),
                           ],
                         ),
                       ),
@@ -1597,12 +1626,14 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text('Settlement Pending', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: ClientColors.alertText)),
-                      const Text('3 bottles remaining to be settled.', style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                      Text('${_currentStock > 0 ? _currentStock : 3} bottles remaining to be settled.', style: const TextStyle(fontSize: 11, color: ClientColors.textMuted)),
                       const SizedBox(height: 2),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Amount: ₹1,053', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
+                          _bottleUnitPrice != null
+                              ? Text('Amount: ₹${((_currentStock > 0 ? _currentStock : 3) * _bottleUnitPrice!).toInt()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.textDark))
+                              : const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
                           InkWell(
                             onTap: () => _changeTab(4),
                             child: const Text('Settle Now ->', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.alertText)),
@@ -1630,7 +1661,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 final int totalBtls = _totalDispatchedBottles;
                 final int soldBtls = _settlementSoldBottles;
                 final int unsoldBtls = totalBtls > soldBtls ? totalBtls - soldBtls : 0;
-                final double totalVal = totalBtls * _bottleUnitPrice;
+                final double totalVal = totalBtls * _unitPrice;
                 final double progress = totalBtls > 0 ? (soldBtls / totalBtls).clamp(0.0, 1.0) : 0.0;
                 final int pctSold = (progress * 100).toInt();
 
@@ -1644,8 +1675,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text('TOTAL VALUE', style: TextStyle(fontSize: 10, color: ClientColors.textMuted, fontWeight: FontWeight.bold)),
-                            Text('₹${totalVal.toInt()}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
-                            Text('$totalBtls btls × ₹${_bottleUnitPrice.toInt()}', style: const TextStyle(fontSize: 10, color: ClientColors.textMuted)),
+                            _bottleUnitPrice != null
+                                ? Text('₹${totalVal.toInt()}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ClientColors.textDark))
+                                : const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
+                            _bottleUnitPrice != null
+                                ? Text('$totalBtls btls × ₹${_bottleUnitPrice!.toInt()}', style: const TextStyle(fontSize: 10, color: ClientColors.textMuted))
+                                : const Text('Loading price...', style: TextStyle(fontSize: 10, color: ClientColors.textMuted)),
                           ],
                         ),
                         Column(
@@ -1839,12 +1874,14 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: ClientColors.border)),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text("Today's Sales", style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
-                      SizedBox(height: 6),
-                      Text('₹1,404', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.primary)),
+                      const Text("Today's Sales", style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                      const SizedBox(height: 6),
+                      _bottleUnitPrice != null
+                          ? Text('₹${(_soldToday * _bottleUnitPrice!).toInt()}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.primary))
+                          : const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
                     ],
                   ),
                 ),
@@ -1854,12 +1891,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: ClientColors.border)),
-                  child: const Column(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Bottles Sold', style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
-                      SizedBox(height: 6),
-                      Text('4', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
+                      const Text('Bottles Sold', style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                      const SizedBox(height: 6),
+                      Text('$_soldToday', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
                     ],
                   ),
                 ),
@@ -1934,7 +1971,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                       children: [
                         const Text('VALUE', style: TextStyle(fontSize: 10, color: ClientColors.textMuted, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 2),
-                        Text('₹${(_currentStock * _bottleUnitPrice).toInt()}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.primary)),
+                        _bottleUnitPrice != null
+                            ? Text('₹${(_currentStock * _bottleUnitPrice!).toInt()}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: ClientColors.primary))
+                            : const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
                       ],
                     ),
                   ],
@@ -1989,7 +2028,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                 const SizedBox(height: 14),
                 _verificationRow('Assigned By', AppState.currentUser?['parent_name'] ?? 'Field Sales Manager (FSM)'),
                 _verificationRow('Quantity', '$_totalDispatchedBottles Bottles'),
-                _verificationRow('Value', '₹${(_totalDispatchedBottles * _bottleUnitPrice).toInt()}'),
+                _verificationRow('Value', _bottleUnitPrice != null ? '₹${(_totalDispatchedBottles * _bottleUnitPrice!).toInt()}' : 'Loading...'),
                 const SizedBox(height: 14),
 
                 // Capture Proof Photo with Camera / Gallery
@@ -2173,7 +2212,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             _stockHistory.insert(0, {
                               'date': 'Today, 09:30 AM',
                               'bottles': _currentStock,
-                              'amount': (_currentStock * _bottleUnitPrice).toInt(),
+                              'amount': (_currentStock * _unitPrice).toInt(),
                               'status': 'SETTLED',
                               'proof_photo': _proofPhotoBase64 ?? _proofPhotoName,
                             });
@@ -2202,12 +2241,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             ..._stockHistory.map((item) => _historyItem(
                   item['date']?.toString() ?? 'Today',
                   '${item['bottles'] ?? 10} Bottles',
-                  '₹${item['amount'] ?? 3510}',
+                  '₹${item['amount'] ?? (_unitPrice * 10).toInt()}',
                   item['status']?.toString() ?? 'SETTLED',
                 ))
           else ...[
-            _historyItem('10 Aug, 09:30 AM', '10 Bottles', '₹3,510', 'SETTLED'),
-            _historyItem('09 Aug, 08:45 AM', '12 Bottles', '₹4,212', 'SETTLED'),
+            _historyItem('10 Aug, 09:30 AM', '10 Bottles', _bottleUnitPrice != null ? '₹${(10 * _bottleUnitPrice!).toInt()}' : 'Loading...', 'SETTLED'),
+            _historyItem('09 Aug, 08:45 AM', '12 Bottles', _bottleUnitPrice != null ? '₹${(12 * _bottleUnitPrice!).toInt()}' : 'Loading...', 'SETTLED'),
           ],
         ],
       ),
@@ -2270,7 +2309,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                       _stockHistory.insert(0, {
                         'date': 'Today, Just Now',
                         'bottles': qty,
-                        'amount': (qty * _bottleUnitPrice).toInt(),
+                        'amount': (qty * _unitPrice).toInt(),
                         'status': 'SETTLED',
                       });
                     });
@@ -2584,10 +2623,16 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 const Text('Stock Value:', style: TextStyle(fontSize: 13, color: ClientColors.textMuted)),
-                                Text(
-                                  '₹${((selectedTransfer!['quantity'] as num?)?.toInt() ?? 10) * 351}',
-                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: ClientColors.primary),
-                                ),
+                                _bottleUnitPrice != null
+                                    ? Text(
+                                        '₹${(((selectedTransfer!['quantity'] as num?)?.toInt() ?? 10) * _bottleUnitPrice!).toInt()}',
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: ClientColors.primary),
+                                      )
+                                    : const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary),
+                                      ),
                               ],
                             ),
                           ],
@@ -2695,7 +2740,6 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   // SCREEN 4: REFER TAB (Tab 3)
   // ===========================================================================
   Widget _buildReferTab() {
-    final referralRate = (_earningsData['referral_rate'] as num?)?.toDouble() ?? 1.0;
     final soldToday = (_earningsData['sold_bottles_today'] as num?)?.toInt() ?? _soldToday;
     final minQuota = (_earningsData['min_sales_quota'] as num?)?.toInt() ?? 5;
     final isQuotaActive = _earningsData['is_quota_condition_active'] != false;
@@ -2734,10 +2778,10 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text('Earn ₹${referralRate.toStringAsFixed(0)} / Bottle', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                const Text('Earn Referral Bonus on Every Sale', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Text(
-                  'Earn ₹${referralRate.toStringAsFixed(0)} for each bottle sold by salesmen in your direct downline.',
+                  'Earn per-product referral bonuses for each unit sold by salesmen in your direct downline.',
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12),
                 ),
               ],
@@ -3229,9 +3273,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     final int damaged = _hasDamagedBottles ? _damagedBottles : 0;
     final int maxAllowed = (heldStock - damaged).clamp(0, heldStock);
     final int remaining = (heldStock - _settlementSoldBottles - damaged).clamp(0, heldStock);
-    final int soldAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
-    final int remainingVal = (remaining * _bottleUnitPrice).toInt();
-    final int totalVal = (heldStock * _bottleUnitPrice).toInt();
+    final int soldAmt = (_settlementSoldBottles * _unitPrice).toInt();
+    final int remainingVal = (remaining * _unitPrice).toInt();
+    final int totalVal = (heldStock * _unitPrice).toInt();
     final int cash = double.tryParse(_cashHandoverCtrl.text.trim())?.toInt() ?? 0;
     final int online = double.tryParse(_onlinePaymentCtrl.text.trim())?.toInt() ?? 0;
     final int totalCollected = cash + online;
@@ -3303,17 +3347,29 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                     color: Colors.white.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.sync_alt_rounded, color: Colors.white, size: 14),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Reconcile with FSM • ₹${_bottleUnitPrice.toInt()} / Bottle',
-                        style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
+                  child: _bottleUnitPrice != null
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.sync_alt_rounded, color: Colors.white, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Reconcile with FSM • ₹${_bottleUnitPrice!.toInt()} / Bottle',
+                              style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        )
+                      : const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white)),
+                            SizedBox(width: 6),
+                            Text(
+                              'Reconcile with FSM • Loading price...',
+                              style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),
@@ -3355,7 +3411,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                           setState(() {
                             _settlementSoldBottles--;
                             _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-                            final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                            final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                             _cashHandoverCtrl.text = '$newAmt';
                             _onlinePaymentCtrl.text = '0';
                           });
@@ -3396,14 +3452,14 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                                         );
                                         setState(() {
                                           _settlementSoldBottles = maxAllowed;
-                                          final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                                          final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                                           _cashHandoverCtrl.text = '$newAmt';
                                           _onlinePaymentCtrl.text = '0';
                                         });
                                       } else {
                                         setState(() {
                                           _settlementSoldBottles = parsed.clamp(0, maxAllowed);
-                                          final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                                          final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                                           _cashHandoverCtrl.text = '$newAmt';
                                           _onlinePaymentCtrl.text = '0';
                                         });
@@ -3431,7 +3487,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                           setState(() {
                             _settlementSoldBottles++;
                             _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-                            final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                            final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                             _cashHandoverCtrl.text = '$newAmt';
                             _onlinePaymentCtrl.text = '0';
                           });
@@ -3456,7 +3512,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                           setState(() {
                             _settlementSoldBottles = maxAllowed;
                             _soldBottlesInputCtrl.text = '$maxAllowed';
-                            final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                            final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                             _cashHandoverCtrl.text = '$newAmt';
                             _onlinePaymentCtrl.text = '0';
                           });
@@ -3471,7 +3527,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             setState(() {
                               _settlementSoldBottles = maxAllowed ~/ 2;
                               _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-                              final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                              final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                               _cashHandoverCtrl.text = '$newAmt';
                               _onlinePaymentCtrl.text = '0';
                             });
@@ -3487,7 +3543,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             setState(() {
                               _settlementSoldBottles = (_settlementSoldBottles + 10).clamp(0, maxAllowed);
                               _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-                              final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                              final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                               _cashHandoverCtrl.text = '$newAmt';
                               _onlinePaymentCtrl.text = '0';
                             });
@@ -3503,7 +3559,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             setState(() {
                               _settlementSoldBottles = (_settlementSoldBottles + 50).clamp(0, maxAllowed);
                               _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
-                              final newAmt = (_settlementSoldBottles * _bottleUnitPrice).toInt();
+                              final newAmt = (_settlementSoldBottles * _unitPrice).toInt();
                               _cashHandoverCtrl.text = '$newAmt';
                               _onlinePaymentCtrl.text = '0';
                             });

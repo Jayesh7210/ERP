@@ -76,7 +76,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
 
   // 1. Dashboard State
   Map<String, dynamic> _dashboardData = {
-    'earnings': {'today_earned': 0, 'bottles_sold': 0, 'rate_per_bottle': 10},
+    'earnings': {'today_earned': 0, 'bottles_sold': 0, 'units_allocated': 0},
     'team_sales': {'bottles': 0},
     'stock_accountability': {'received': 0, 'allocated': 0, 'sold': 0, 'remaining': 0},
     'top_performers': [],
@@ -108,6 +108,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
   };
 
   int get _availableDepotStock => (_dashboardData['available_depot_stock'] as num?)?.toInt() ?? 0;
+  double? _bottleUnitPrice;
 
   @override
   void initState() {
@@ -124,11 +125,28 @@ class _FsmDashboardState extends State<FsmDashboard> {
       _loadTeamRoster(),
       _loadReferralRequests(),
       _loadSettlementHub(),
+      _loadProductPricing(),
     ]);
     if (mounted) setState(() => _isLoading = false);
 
     // Auto-sync pending offline transactions for FSM
     _syncPendingActions(silent: true);
+  }
+
+  Future<void> _loadProductPricing() async {
+    try {
+      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body);
+        if (list is List && list.isNotEmpty) {
+          final first = list.first;
+          final basePrice = (first['base_price'] as num?)?.toDouble();
+          if (basePrice != null && basePrice > 0) {
+            if (mounted) setState(() => _bottleUnitPrice = basePrice);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _syncPendingActions({bool silent = false}) async {
@@ -898,10 +916,16 @@ Future<void> _loadDashboardMetrics() async {
                                   '$quantity btls',
                                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: ClientColors.primary),
                                 ),
-                                Text(
-                                  '₹${quantity * 351}',
-                                  style: const TextStyle(fontSize: 11, color: ClientColors.textMuted, fontWeight: FontWeight.w600),
-                                ),
+                                _bottleUnitPrice != null
+                                    ? Text(
+                                        '₹${(quantity * _bottleUnitPrice!).toInt()}',
+                                        style: const TextStyle(fontSize: 11, color: ClientColors.textMuted, fontWeight: FontWeight.w600),
+                                      )
+                                    : const SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary),
+                                      ),
                               ],
                             ),
                           ],
@@ -2550,7 +2574,7 @@ Future<void> _loadDashboardMetrics() async {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${earnings['bottles_sold'] ?? 0} btls × ₹${earnings['rate_per_bottle'] ?? 10}',
+                          '${earnings['units_allocated'] ?? earnings['bottles_sold'] ?? 0} units allocated to team',
                           style: const TextStyle(fontSize: 10, color: Colors.white70),
                         ),
                       ],

@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS products (
     image_url TEXT,
     base_price DECIMAL(12, 2) DEFAULT 0.00,
     min_stock_alert INT DEFAULT 20,
+    store_admin_commission DECIMAL(12, 2) DEFAULT 0.00,
+    fsm_commission DECIMAL(12, 2) DEFAULT 0.00,
+    salesman_commission DECIMAL(12, 2) DEFAULT 0.00,
+    referral_commission DECIMAL(12, 2) DEFAULT 0.00,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
