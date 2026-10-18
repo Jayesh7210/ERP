@@ -14,7 +14,7 @@ A role-based, multi-tier inventory distribution and sales management application
 **Key Architectural Distinction:**
 - **Zero Customer Referral Policy:** Customers do NOT have any referral codes, bonuses, or referral policies.
 - **Workforce Referral Network:** Referral policy is exclusively for internal staff (**Store Admin, Field Sales Manager (FSM), and Salesman**). Staff can refer other staff members into the sales tree.
-- **Per-Bottle Downline Commission:** Referrers earn commission on every bottle sold by their downline referrals (e.g., ₹1.00 per bottle).
+- **Per-Bottle Downline Commission:** Referrers ea+rn commission on every bottle sold by their downline referrals (e.g., ₹1.00 per bottle).
 - **Super Admin Qualification Gate:** Referrers must meet a minimum sales quota themselves (e.g., sell at least 5 bottles/day) to unlock and receive downline commissions.
 - **Strict Stock Intake & Multi-Tier Flow:** Store Manager receives intake -> Super Admin approves -> Stock added to warehouse -> Warehouse Manager distributes to FSMs -> FSM distributes to Salesmen -> Salesmen sell bottles.
 
