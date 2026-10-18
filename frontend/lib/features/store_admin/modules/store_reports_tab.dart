@@ -6,6 +6,7 @@ import '../../../core/constants/colors.dart';
 // ---------------------------------------------------------
 class StoreReportsView extends StatefulWidget {
   final String warehouseId;
+  final String warehouseName;
   final List<Map<String, dynamic>> intakes;
   final List<Map<String, dynamic>> transfers;
   final List<Map<String, dynamic>> sales;
@@ -16,6 +17,7 @@ class StoreReportsView extends StatefulWidget {
   const StoreReportsView({
     super.key,
     required this.warehouseId,
+    this.warehouseName = '',
     required this.intakes,
     required this.transfers,
     required this.sales,
@@ -53,7 +55,7 @@ class _StoreReportsViewState extends State<StoreReportsView> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Reports & audit records are strictly scoped to Warehouse #${widget.warehouseId}.',
+                    'Reports & audit records are strictly scoped to ${widget.warehouseName.isNotEmpty ? widget.warehouseName : 'Warehouse #${widget.warehouseId}'}.',
                     style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                 ),
@@ -230,6 +232,9 @@ class _StoreReportsViewState extends State<StoreReportsView> {
         final dest = t['to_name'] ?? 'FSM';
         final date = t['created_at']?.toString().split('T').first ?? 'N/A';
 
+        final status = (t['status'] ?? 'COMPLETED').toString().toUpperCase();
+        final isPending = status == 'PENDING';
+
         return Card(
           color: Colors.white,
           margin: const EdgeInsets.only(bottom: 8),
@@ -239,8 +244,18 @@ class _StoreReportsViewState extends State<StoreReportsView> {
             subtitle: Text('To FSM: $dest • Date: $date', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(6)),
-              child: Text('COMPLETED', style: TextStyle(color: Colors.green.shade800, fontSize: 10, fontWeight: FontWeight.bold)),
+              decoration: BoxDecoration(
+                color: isPending ? Colors.amber.shade50 : Colors.green.shade50,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                status,
+                style: TextStyle(
+                  color: isPending ? Colors.amber.shade800 : Colors.green.shade800,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ),
         );

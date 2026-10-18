@@ -19,8 +19,8 @@ class ReferralRequestsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pendingCount = requestsSummary['pending'] ?? 12;
-    final reviewCount = requestsSummary['in_review'] ?? 4;
+    final pendingCount = (requestsSummary['pending'] as num?)?.toInt() ?? 0;
+    final reviewCount = (requestsSummary['in_review'] as num?)?.toInt() ?? 0;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -105,8 +105,18 @@ class ReferralRequestsTab extends StatelessWidget {
           const SizedBox(height: 14),
 
           // Candidates Roster
-          ...referralRequests.map((req) {
-            final String reqId = req['id'] ?? '';
+          if (referralRequests.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(28),
+              alignment: Alignment.center,
+              child: const Text(
+                'No candidate referral requests found.',
+                style: TextStyle(fontSize: 13, color: ClientColors.textMuted),
+              ),
+            )
+          else
+            ...referralRequests.map((req) {
+              final String reqId = req['id'] ?? '';
             final String candidateName = req['candidate_name'] ?? 'Candidate';
             final String referredBy = req['referred_by'] ?? 'Salesman';
             final String timestamp = req['timestamp'] ?? '';

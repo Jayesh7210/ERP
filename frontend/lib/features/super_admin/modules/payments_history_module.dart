@@ -15,6 +15,30 @@ class PaymentsHistoryModule extends StatefulWidget {
     required this.onBack,
   });
 
+  static bool isStaticPayment(Map<String, dynamic> p) {
+    final id = (p['id'] ?? '').toString();
+    final no = (p['payment_no'] ?? '').toString();
+    final payer = (p['payer_name'] ?? '').toString().toLowerCase();
+    final ref = (p['reference_id'] ?? '').toString();
+
+    if (id == 'pay_101' || id == 'pay_102' || id == 'pay_103' || id == 'pay_104' || id == 'pay_105') {
+      return true;
+    }
+    if (id.startsWith('pay_sale_10') || ref.startsWith('sale_10')) {
+      return true;
+    }
+    if (no == 'PAY-SAL-00841' || no == 'PAY-SAL-00842' || no == 'PAY-SAL-00843' || no == 'PAY-STL-00219' || no == 'PAY-REF-00054') {
+      return true;
+    }
+    if (payer.contains('metro daily mart') ||
+        payer.contains('sunrise hospitality') ||
+        payer.contains('sharma sweets') ||
+        payer.contains('sanap erp treasury')) {
+      return true;
+    }
+    return false;
+  }
+
   @override
   State<PaymentsHistoryModule> createState() => _PaymentsHistoryModuleState();
 }
@@ -26,7 +50,9 @@ class _PaymentsHistoryModuleState extends State<PaymentsHistoryModule> {
 
   @override
   Widget build(BuildContext context) {
-    final filtered = widget.payments.where((p) {
+    final nonStaticPayments = widget.payments.where((p) => !PaymentsHistoryModule.isStaticPayment(p)).toList();
+
+    final filtered = nonStaticPayments.where((p) {
       if (_paymentTypeFilter != 'all') {
         if (p['type'] != _paymentTypeFilter) return false;
       }
@@ -51,52 +77,42 @@ class _PaymentsHistoryModuleState extends State<PaymentsHistoryModule> {
       return true;
     }).toList();
 
-    final totalCollected =
-        double.tryParse(
-          widget.paymentsSummary['total_collected']?.toString() ?? '0',
-        ) ??
-        widget.payments
-            .where((p) => p['type'] != 'referral_payout')
-            .fold<double>(
-              0.0,
-              (sum, p) =>
-                  sum +
-                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
-            );
-    final onlineTotal =
-        double.tryParse(widget.paymentsSummary['online_total']?.toString() ?? '0') ??
-        widget.payments
-            .where(
-              (p) =>
-                  p['payment_method'] == 'online' ||
-                  p['payment_method'] == 'upi',
-            )
-            .fold<double>(
-              0.0,
-              (sum, p) =>
-                  sum +
-                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
-            );
-    final cashTotal =
-        double.tryParse(widget.paymentsSummary['cash_total']?.toString() ?? '0') ??
-        widget.payments
-            .where((p) => p['payment_method'] == 'cash')
-            .fold<double>(
-              0.0,
-              (sum, p) =>
-                  sum +
-                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
-            );
-    final payoutsTotal =
-        double.tryParse(widget.paymentsSummary['payouts_total']?.toString() ?? '0') ??
-        widget.payments
-            .where((p) => p['type'] == 'referral_payout')
-            .fold<double>(
-              0.0,
-              (sum, p) =>
-                  sum +
-                  (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
-            );
+    final totalCollected = nonStaticPayments
+        .where((p) => p['type'] != 'referral_payout')
+        .fold<double>(
+          0.0,
+          (sum, p) =>
+              sum +
+              (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+        );
+    final onlineTotal = nonStaticPayments
+        .where(
+          (p) =>
+              p['payment_method'] == 'online' ||
+              p['payment_method'] == 'upi',
+        )
+        .fold<double>(
+          0.0,
+          (sum, p) =>
+              sum +
+              (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+        );
+    final cashTotal = nonStaticPayments
+        .where((p) => p['payment_method'] == 'cash')
+        .fold<double>(
+          0.0,
+          (sum, p) =>
+              sum +
+              (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+        );
+    final payoutsTotal = nonStaticPayments
+        .where((p) => p['type'] == 'referral_payout')
+        .fold<double>(
+          0.0,
+          (sum, p) =>
+              sum +
+              (double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0),
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9F7F5),

@@ -78,8 +78,17 @@ class _FsmDashboardState extends State<FsmDashboard> {
     SystemNavigator.pop();
   }
 
-  String get _fsmId => AppState.currentUser?['id'] ?? 'u3';
-  String get _fsmName => AppState.currentUser?['name'] ?? 'Field Sales Manager';
+  String get _fsmId => AppState.currentUser?['id']?.toString() ?? '';
+  String get _fsmName => AppState.currentUser?['name']?.toString() ?? 'Field Sales Manager';
+  String? _productId;
+  String? _productName;
+
+  String get _initials {
+    final parts = _fsmName.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts[0].isEmpty) return 'FM';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
 
   // 1. Dashboard State
   Map<String, dynamic> _dashboardData = {
@@ -148,8 +157,12 @@ class _FsmDashboardState extends State<FsmDashboard> {
         if (list is List && list.isNotEmpty) {
           final first = list.first;
           final basePrice = (first['base_price'] as num?)?.toDouble();
-          if (basePrice != null && basePrice > 0) {
-            if (mounted) setState(() => _bottleUnitPrice = basePrice);
+          if (mounted) {
+            setState(() {
+              if (basePrice != null && basePrice > 0) _bottleUnitPrice = basePrice;
+              _productId = first['id']?.toString();
+              _productName = first['name']?.toString();
+            });
           }
         }
       }
@@ -338,6 +351,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
       availableDepotStock: _availableDepotStock,
       supervisedSalesmen: _supervisedSalesmen,
       bottleUnitPrice: _bottleUnitPrice,
+      productId: _productId,
+      productName: _productName,
       onStockUpdated: _loadAllFsmData,
     );
   }
@@ -370,6 +385,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
     FsmWarehouseReturnDialog.show(
       context: context,
       fsmId: _fsmId,
+      availableDepotStock: _availableDepotStock,
     );
   }
 
@@ -464,7 +480,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                         ),
                         OperationsHomeTab(
                           availableDepotStock: _availableDepotStock,
-                          pendingRequestsCount: (_requestsSummary['pending'] as num?)?.toInt() ?? 12,
+                          pendingRequestsCount: (_requestsSummary['pending'] as num?)?.toInt() ?? 0,
                           onAllocateStock: _openStockAllocationModal,
                           onNavigateTab: _changeTab,
                           onScanWarehouseQR: _handleScanWarehouseQR,
@@ -558,9 +574,9 @@ class _FsmDashboardState extends State<FsmDashboard> {
               CircleAvatar(
                 radius: 17,
                 backgroundColor: ClientColors.primary.withValues(alpha: 0.12),
-                child: const Text(
-                  'AS',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.primary),
+                child: Text(
+                  _initials,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.primary),
                 ),
               ),
               Positioned(

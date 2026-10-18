@@ -15,6 +15,8 @@ class FsmStockAllocationModal {
     required int availableDepotStock,
     required List<Map<String, dynamic>> supervisedSalesmen,
     required double? bottleUnitPrice,
+    String? productId,
+    String? productName,
     required VoidCallback onStockUpdated,
   }) {
     final rootMessenger = ScaffoldMessenger.of(context);
@@ -160,11 +162,34 @@ class FsmStockAllocationModal {
 
                   // Salesmen Interactive List
                   Expanded(
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                      itemCount: supervisedSalesmen.length,
-                      separatorBuilder: (context, index) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
+                    child: supervisedSalesmen.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.people_outline, size: 48, color: Colors.grey.shade400),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'No Salesmen in Team',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: ClientColors.textDark),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'There are currently no active salesmen assigned to your team in the database.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(fontSize: 12, color: ClientColors.textMuted),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                            itemCount: supervisedSalesmen.length,
+                            separatorBuilder: (context, index) => const SizedBox(height: 10),
+                            itemBuilder: (context, index) {
                         final sm = supervisedSalesmen[index];
                         final String smId = sm['id'].toString();
                         final String smName = sm['name'] ?? 'Salesman';
@@ -296,6 +321,8 @@ class FsmStockAllocationModal {
                                         fsmId: fsmId,
                                         fsmName: fsmName,
                                         bottleUnitPrice: bottleUnitPrice,
+                                        productId: productId,
+                                        productName: productName,
                                         salesmanId: smId,
                                         salesmanName: smName,
                                         quantity: curQty,
@@ -367,6 +394,8 @@ class FsmStockAllocationModal {
                                         fsmId: fsmId,
                                         fsmName: fsmName,
                                         bottleUnitPrice: bottleUnitPrice,
+                                        productId: productId,
+                                        productName: productName,
                                         salesmanId: first.key,
                                         salesmanName: sm['name'] ?? 'Salesman',
                                         quantity: first.value,
@@ -405,13 +434,29 @@ class FsmStockAllocationModal {
     required String fsmId,
     required String fsmName,
     required double? bottleUnitPrice,
+    String? productId,
+    String? productName,
     required String salesmanId,
     required String salesmanName,
     required int quantity,
     required VoidCallback onStockUpdated,
   }) async {
-    const productId = '6602541b-1e4d-4162-bc86-e44f05cda0b3';
-    const productName = 'Water Bottle';
+    String resolvedProdId = productId ?? '';
+    String resolvedProdName = productName ?? 'Water Bottle';
+
+    if (resolvedProdId.isEmpty) {
+      try {
+        final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
+        if (res.statusCode == 200) {
+          final list = jsonDecode(res.body);
+          if (list is List && list.isNotEmpty) {
+            resolvedProdId = list.first['id']?.toString() ?? '';
+            resolvedProdName = list.first['name']?.toString() ?? 'Water Bottle';
+          }
+        }
+      } catch (_) {}
+    }
+
     String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
 
     try {
@@ -426,7 +471,7 @@ class FsmStockAllocationModal {
         payload: {
           'from_id': fsmId,
           'to_id': salesmanId,
-          'product_id': productId,
+          'product_id': resolvedProdId,
           'quantity': quantity,
           'status': 'pending',
         },
@@ -450,8 +495,8 @@ class FsmStockAllocationModal {
       'from_fsm_name': fsmName,
       'to_salesman_id': salesmanId,
       'salesman_name': salesmanName,
-      'product_id': productId,
-      'product_name': productName,
+      'product_id': resolvedProdId,
+      'product_name': resolvedProdName,
       'quantity': quantity,
       'security_pin': securityPin,
       'created_at': DateTime.now().toIso8601String(),
@@ -464,7 +509,7 @@ class FsmStockAllocationModal {
       transferId: transferId,
       salesmanId: salesmanId,
       salesmanName: salesmanName,
-      productName: productName,
+      productName: resolvedProdName,
       quantity: quantity,
       securityPin: securityPin,
       qrPayload: qrPayload,

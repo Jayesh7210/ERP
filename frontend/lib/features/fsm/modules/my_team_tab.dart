@@ -100,16 +100,27 @@ class MyTeamTab extends StatelessWidget {
           const SizedBox(height: 10),
 
           // Salesmen Roster Cards
-          ...supervisedSalesmen.map((sm) {
-            final String name = sm['name'] ?? 'Salesman';
-            final String zone = sm['zone'] ?? 'Zone A';
-            final String code = sm['code'] ?? 'SP-00';
-            final bool isActive = sm['is_active'] == true;
-            final int soldToday = (sm['sold_today'] as num?)?.toInt() ?? 0;
-            final int stock = (sm['current_stock'] as num?)?.toInt() ?? 0;
-            final bool isLowStock = stock <= 10;
+          if (supervisedSalesmen.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              alignment: Alignment.center,
+              child: const Text(
+                'No salesmen assigned to your team yet.',
+                style: TextStyle(fontSize: 13, color: ClientColors.textMuted),
+              ),
+            )
+          else
+            ...supervisedSalesmen.map((sm) {
+              final String name = sm['name'] ?? 'Salesman';
+              final String zone = sm['zone'] ?? sm['location'] ?? (sm['phone'] != null ? 'Ph: ${sm['phone']}' : 'Field Sales');
+              final smId = sm['id']?.toString() ?? '';
+              final String code = sm['code'] ?? (smId.isNotEmpty ? 'ID: ${smId.substring(0, smId.length > 6 ? 6 : smId.length).toUpperCase()}' : 'Agent');
+              final bool isActive = sm['is_active'] == true;
+              final int soldToday = (sm['sold_today'] as num?)?.toInt() ?? 0;
+              final int stock = (sm['current_stock'] as num?)?.toInt() ?? 0;
+              final bool isLowStock = stock <= 10;
 
-            return Container(
+              return Container(
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(

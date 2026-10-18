@@ -36,6 +36,42 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
   final TextEditingController _commissionSearchCtrl = TextEditingController();
   final Set<String> _expandedCommissionProductIds = {};
 
+  // Static cache so custom criteria and dynamic slabs persist seamlessly
+  static final Map<String, Map<String, dynamic>> _customProductMeta = {};
+
+  static List<Map<String, dynamic>> getProductSlabs(Map<String, dynamic> p) {
+    final pId = p['id']?.toString() ?? '';
+    if (_customProductMeta.containsKey(pId) && _customProductMeta[pId]?['commission_slabs'] != null) {
+      final sList = _customProductMeta[pId]!['commission_slabs'];
+      if (sList is List && sList.isNotEmpty) {
+        return (sList).map((s) => Map<String, dynamic>.from(s as Map)).toList();
+      }
+    }
+    if (p['commission_slabs'] != null && p['commission_slabs'] is List && (p['commission_slabs'] as List).isNotEmpty) {
+      return (p['commission_slabs'] as List).map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    }
+    return [
+      {'from_qty': 101, 'to_qty': 110, 'added_commission': 5.0, 'label': 'Tier 1 (+₹5)'},
+      {'from_qty': 111, 'to_qty': 130, 'added_commission': 10.0, 'label': 'Tier 2 (+₹10)'},
+    ];
+  }
+
+  static int getProductInitialQuota(Map<String, dynamic> p) {
+    final pId = p['id']?.toString() ?? '';
+    if (_customProductMeta.containsKey(pId) && _customProductMeta[pId]?['initial_stock_quota'] != null) {
+      return int.tryParse(_customProductMeta[pId]!['initial_stock_quota'].toString()) ?? 100;
+    }
+    return int.tryParse(p['initial_stock_quota']?.toString() ?? '100') ?? 100;
+  }
+
+  static double getRoleComm(Map<String, dynamic> p, String key) {
+    final pId = p['id']?.toString() ?? '';
+    if (_customProductMeta.containsKey(pId) && _customProductMeta[pId]?[key] != null) {
+      return double.tryParse(_customProductMeta[pId]![key].toString()) ?? 0.0;
+    }
+    return double.tryParse(p[key]?.toString() ?? '0') ?? 0.0;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -63,24 +99,50 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
       text: editProduct?['category'] ?? 'General',
     );
     final basePriceCtrl = TextEditingController(
-      text: editProduct?['base_price']?.toString() ?? '0',
+      text: editProduct?['base_price']?.toString() ?? '50',
     );
     final alertCtrl = TextEditingController(
       text: editProduct?['min_stock_alert']?.toString() ?? '20',
     );
+    final initialStockCtrl = TextEditingController(
+      text: (editProduct != null
+              ? getProductInitialQuota(editProduct)
+              : 100)
+          .toString(),
+    );
     final storeAdminCommCtrl = TextEditingController(
-      text: editProduct?['store_admin_commission']?.toString() ?? '5.0',
+      text: (editProduct != null
+              ? getRoleComm(editProduct, 'store_admin_commission')
+              : 5.0)
+          .toString(),
     );
     final fsmCommCtrl = TextEditingController(
-      text: editProduct?['fsm_commission']?.toString() ?? '10.0',
+      text: (editProduct != null
+              ? getRoleComm(editProduct, 'fsm_commission')
+              : 10.0)
+          .toString(),
     );
     final salesmanCommCtrl = TextEditingController(
-      text: editProduct?['salesman_commission']?.toString() ?? '50.0',
+      text: (editProduct != null
+              ? getRoleComm(editProduct, 'salesman_commission')
+              : 50.0)
+          .toString(),
     );
     final referralCommCtrl = TextEditingController(
-      text: editProduct?['referral_commission']?.toString() ?? '10.0',
+      text: (editProduct != null
+              ? getRoleComm(editProduct, 'referral_commission')
+              : 10.0)
+          .toString(),
     );
     bool isAvailable = editProduct?['is_active'] != false;
+
+    // Slabs list
+    List<Map<String, dynamic>> slabs = editProduct != null
+        ? getProductSlabs(editProduct)
+        : [
+            {'from_qty': 101, 'to_qty': 110, 'added_commission': 5.0, 'label': 'Tier 1 (+₹5)'},
+            {'from_qty': 111, 'to_qty': 130, 'added_commission': 10.0, 'label': 'Tier 2 (+₹10)'},
+          ];
 
     showDialog(
       context: context,
@@ -94,9 +156,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Product Name *',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Product Name *'),
                 ),
                 TextField(
                   controller: skuCtrl,
@@ -109,17 +169,17 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 TextField(
                   controller: unitCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Selling Unit (pcs, packet, etc.)',
+                    labelText: 'Selling Unit (pcs, jar, packet, etc.)',
                   ),
                 ),
                 TextField(
                   controller: basePriceCtrl,
                   decoration: const InputDecoration(
-                    labelText: 'Base Selling Price (₹)',
+                    labelText: 'Base Selling Price (₹) *',
+                    helperText: 'Standard price applied up to initial stock',
                   ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setDlgState(() {}),
                 ),
                 TextField(
                   controller: alertCtrl,
@@ -128,7 +188,146 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   ),
                   keyboardType: TextInputType.number,
                 ),
+                const SizedBox(height: 16),
+
+                // Initial Stock & Over-Quota Slabs Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.layers_outlined, size: 18, color: Colors.amber.shade900),
+                          const SizedBox(width: 6),
+                          Text(
+                            'INITIAL STOCK & SURGE CRITERIA',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: initialStockCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Initial Defined Stock Quota *',
+                          helperText: 'Units up to this count sell strictly at Base Price',
+                          isDense: true,
+                        ),
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) => setDlgState(() {}),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Over-Stock Surge Slabs:',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                          ),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Add Slab', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              setDlgState(() {
+                                final lastTo = slabs.isNotEmpty
+                                    ? (int.tryParse(slabs.last['to_qty']?.toString() ?? '100') ?? 100)
+                                    : (int.tryParse(initialStockCtrl.text) ?? 100);
+                                slabs.add({
+                                  'from_qty': lastTo + 1,
+                                  'to_qty': lastTo + 20,
+                                  'added_commission': 15.0,
+                                  'label': 'Tier ${slabs.length + 1} (+₹15)',
+                                });
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      if (slabs.isEmpty)
+                        Text(
+                          'No surge slabs added. All over-quota sales will remain at Base Price.',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                        )
+                      else
+                        ...slabs.asMap().entries.map((entry) {
+                          final idx = entry.key;
+                          final slab = entry.value;
+                          final baseP = double.tryParse(basePriceCtrl.text) ?? 0.0;
+                          final addedC = double.tryParse(slab['added_commission']?.toString() ?? '0') ?? 0.0;
+                          final totalP = baseP + addedC;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Units ${slab['from_qty']} to ${slab['to_qty']}',
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        '+₹${addedC.toStringAsFixed(1)} commission',
+                                        style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.green.shade200),
+                                  ),
+                                  child: Text(
+                                    '₹${totalP.toStringAsFixed(1)}/ea',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.green.shade900,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () {
+                                    setDlgState(() => slabs.removeAt(idx));
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 14),
+
                 // Dynamic Per-Product Commission Rules Section
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -146,7 +345,11 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                           SizedBox(width: 6),
                           Text(
                             'COMMISSION RULES (Per Unit)',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
                           ),
                         ],
                       ),
@@ -195,19 +398,12 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 ),
                 const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isAvailable
-                        ? Colors.green.shade50
-                        : Colors.red.shade50,
+                    color: isAvailable ? Colors.green.shade50 : Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isAvailable
-                          ? Colors.green.shade300
-                          : Colors.red.shade300,
+                      color: isAvailable ? Colors.green.shade300 : Colors.red.shade300,
                     ),
                   ),
                   child: Row(
@@ -219,13 +415,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                           Row(
                             children: [
                               Icon(
-                                isAvailable
-                                    ? Icons.check_circle
-                                    : Icons.do_not_disturb_on,
+                                isAvailable ? Icons.check_circle : Icons.do_not_disturb_on,
                                 size: 16,
-                                color: isAvailable
-                                    ? Colors.green.shade800
-                                    : Colors.red.shade800,
+                                color: isAvailable ? Colors.green.shade800 : Colors.red.shade800,
                               ),
                               const SizedBox(width: 6),
                               Text(
@@ -233,9 +425,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: isAvailable
-                                      ? Colors.green.shade800
-                                      : Colors.red.shade800,
+                                  color: isAvailable ? Colors.green.shade800 : Colors.red.shade800,
                                 ),
                               ),
                             ],
@@ -247,9 +437,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                 : 'Item is inactive / hidden from sales',
                             style: TextStyle(
                               fontSize: 10.5,
-                              color: isAvailable
-                                  ? Colors.green.shade700
-                                  : Colors.red.shade700,
+                              color: isAvailable ? Colors.green.shade700 : Colors.red.shade700,
                             ),
                           ),
                         ],
@@ -258,8 +446,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                         value: isAvailable,
                         activeThumbColor: Colors.green,
                         inactiveThumbColor: Colors.red,
-                        onChanged: (val) =>
-                            setDlgState(() => isAvailable = val),
+                        onChanged: (val) => setDlgState(() => isAvailable = val),
                       ),
                     ],
                   ),
@@ -285,8 +472,10 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   'sku': skuCtrl.text.trim(),
                   'category': catCtrl.text.trim(),
                   'unit': unitCtrl.text.trim(),
-                  'base_price': double.tryParse(basePriceCtrl.text) ?? 0.0,
+                  'base_price': double.tryParse(basePriceCtrl.text) ?? 50.0,
                   'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
+                  'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                  'commission_slabs': slabs,
                   'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
                   'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
                   'salesman_commission': double.tryParse(salesmanCommCtrl.text) ?? 0.0,
@@ -298,10 +487,16 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
 
                 try {
                   if (editProduct != null) {
+                    _customProductMeta[editProduct['id'].toString()] = {
+                      'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                      'commission_slabs': slabs,
+                      'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
+                      'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
+                      'salesman_commission': double.tryParse(salesmanCommCtrl.text) ?? 0.0,
+                      'referral_commission': double.tryParse(referralCommCtrl.text) ?? 0.0,
+                    };
                     await http.put(
-                      Uri.parse(
-                        '${AppState.apiBaseUrl}/products/${editProduct['id']}',
-                      ),
+                      Uri.parse('${AppState.apiBaseUrl}/products/${editProduct['id']}'),
                       headers: {'Content-Type': 'application/json'},
                       body: jsonEncode(bodyData),
                     );
@@ -321,18 +516,14 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                       editProduct['sku'] = skuCtrl.text.trim();
                       editProduct['category'] = catCtrl.text.trim();
                       editProduct['unit'] = unitCtrl.text.trim();
-                      editProduct['base_price'] =
-                          double.tryParse(basePriceCtrl.text) ?? 0.0;
-                      editProduct['min_stock_alert'] =
-                          int.tryParse(alertCtrl.text) ?? 20;
-                      editProduct['store_admin_commission'] =
-                          double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
-                      editProduct['fsm_commission'] =
-                          double.tryParse(fsmCommCtrl.text) ?? 0.0;
-                      editProduct['salesman_commission'] =
-                          double.tryParse(salesmanCommCtrl.text) ?? 0.0;
-                      editProduct['referral_commission'] =
-                          double.tryParse(referralCommCtrl.text) ?? 0.0;
+                      editProduct['base_price'] = double.tryParse(basePriceCtrl.text) ?? 50.0;
+                      editProduct['min_stock_alert'] = int.tryParse(alertCtrl.text) ?? 20;
+                      editProduct['initial_stock_quota'] = int.tryParse(initialStockCtrl.text) ?? 100;
+                      editProduct['commission_slabs'] = slabs;
+                      editProduct['store_admin_commission'] = double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
+                      editProduct['fsm_commission'] = double.tryParse(fsmCommCtrl.text) ?? 0.0;
+                      editProduct['salesman_commission'] = double.tryParse(salesmanCommCtrl.text) ?? 0.0;
+                      editProduct['referral_commission'] = double.tryParse(referralCommCtrl.text) ?? 0.0;
                       editProduct['is_active'] = isAvailable;
                     } else {
                       widget.products.add({
@@ -341,17 +532,14 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                         'sku': skuCtrl.text.trim(),
                         'category': catCtrl.text.trim(),
                         'unit': unitCtrl.text.trim(),
-                        'base_price':
-                            double.tryParse(basePriceCtrl.text) ?? 0.0,
+                        'base_price': double.tryParse(basePriceCtrl.text) ?? 50.0,
                         'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
-                        'store_admin_commission':
-                            double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
-                        'fsm_commission':
-                            double.tryParse(fsmCommCtrl.text) ?? 0.0,
-                        'salesman_commission':
-                            double.tryParse(salesmanCommCtrl.text) ?? 0.0,
-                        'referral_commission':
-                            double.tryParse(referralCommCtrl.text) ?? 0.0,
+                        'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                        'commission_slabs': slabs,
+                        'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
+                        'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
+                        'salesman_commission': double.tryParse(salesmanCommCtrl.text) ?? 0.0,
+                        'referral_commission': double.tryParse(referralCommCtrl.text) ?? 0.0,
                         'is_active': isAvailable,
                       });
                     }
@@ -359,9 +547,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   if (ctx.mounted) Navigator.pop(ctx);
                 }
               },
-              child: Text(
-                editProduct != null ? 'Save Changes' : 'Create Product',
-              ),
+              child: Text(editProduct != null ? 'Save Changes' : 'Create Product'),
             ),
           ],
         ),
@@ -396,9 +582,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   ? '🟢 "${p['name']}" is now AVAILABLE'
                   : '🔴 "${p['name']}" is now NOT AVAILABLE',
             ),
-            backgroundColor: nextStatus
-                ? Colors.green.shade700
-                : Colors.red.shade700,
+            backgroundColor: nextStatus ? Colors.green.shade700 : Colors.red.shade700,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -506,37 +690,23 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
               DropdownButtonFormField<String>(
                 initialValue: selectedRole,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Buyer / Tier Role',
-                ),
+                decoration: const InputDecoration(labelText: 'Buyer / Tier Role'),
                 items: const [
                   DropdownMenuItem(
                     value: 'store_admin',
-                    child: Text(
-                      'Warehouse Admin (Store Admin)',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text('Warehouse Admin (Store Admin)', overflow: TextOverflow.ellipsis),
                   ),
                   DropdownMenuItem(
                     value: 'field_sales_manager',
-                    child: Text(
-                      'Field Sales Manager',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text('Field Sales Manager', overflow: TextOverflow.ellipsis),
                   ),
                   DropdownMenuItem(
                     value: 'salesman',
-                    child: Text(
-                      'Salesman (Retail Rate)',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text('Salesman (Retail Rate)', overflow: TextOverflow.ellipsis),
                   ),
                   DropdownMenuItem(
                     value: 'distributor',
-                    child: Text(
-                      'Distributor (Bulk Wholesale Rate)',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text('Distributor (Bulk Wholesale Rate)', overflow: TextOverflow.ellipsis),
                   ),
                 ],
                 onChanged: (v) {
@@ -555,9 +725,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   labelText: 'Selling Price (₹)',
                   prefixText: '₹',
                 ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -566,9 +734,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   labelText: 'Promotional Discount (%)',
                   suffixText: '%',
                 ),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
             ],
           ),
@@ -605,9 +771,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 } catch (_) {
                   setState(() {
                     widget.prices.removeWhere(
-                      (p) =>
-                          p['product_id'] == product['id'] &&
-                          p['role'] == selectedRole,
+                      (p) => p['product_id'] == product['id'] && p['role'] == selectedRole,
                     );
                     widget.prices.add({
                       'product_id': product['id'],
@@ -627,191 +791,471 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
     );
   }
 
-  void _showEditCommissionDialog(Map<String, dynamic> product) {
+  // Option B: Comprehensive Manual Criteria & Slabs Editor
+  void _showEditCommissionAndSlabsDialog(Map<String, dynamic> product) {
+    final basePriceCtrl = TextEditingController(
+      text: (product['base_price'] ?? 50).toString(),
+    );
+    final initialStockCtrl = TextEditingController(
+      text: getProductInitialQuota(product).toString(),
+    );
     final storeAdminCommCtrl = TextEditingController(
-      text: (product['store_admin_commission'] ?? 0).toString(),
+      text: getRoleComm(product, 'store_admin_commission').toString(),
     );
     final fsmCommCtrl = TextEditingController(
-      text: (product['fsm_commission'] ?? 0).toString(),
+      text: getRoleComm(product, 'fsm_commission').toString(),
     );
     final salesmanCommCtrl = TextEditingController(
-      text: (product['salesman_commission'] ?? 0).toString(),
+      text: getRoleComm(product, 'salesman_commission').toString(),
     );
     final referralCommCtrl = TextEditingController(
-      text: (product['referral_commission'] ?? 0).toString(),
+      text: getRoleComm(product, 'referral_commission').toString(),
     );
+
+    // Copy slabs into editable local list
+    List<Map<String, dynamic>> localSlabs = getProductSlabs(product)
+        .map((s) => Map<String, dynamic>.from(s))
+        .toList();
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.monetization_on_outlined, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Edit Commissions: ${product['name']}',
-                  style: const TextStyle(fontSize: 16),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+        builder: (ctx, setDlgState) {
+          final currentBase = double.tryParse(basePriceCtrl.text) ?? 50.0;
+          final currentInit = int.tryParse(initialStockCtrl.text) ?? 100;
+
+          return AlertDialog(
+            title: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(8),
+                const Icon(Icons.tune, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Manual Pricing & Slabs: ${product['name']}',
+                    style: const TextStyle(fontSize: 16),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Base Price: ₹${product['base_price']}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary),
-                      ),
-                      Text(
-                        'Unit: ${product['unit'] ?? 'pcs'}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: storeAdminCommCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Store Admin Commission (₹)',
-                    helperText: 'Earned when Store Admin dispatches stock to FSM',
-                    isDense: true,
-                    prefixText: '₹ ',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: fsmCommCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'FSM Commission (₹)',
-                    helperText: 'Earned when FSM allocates stock to Salesman',
-                    isDense: true,
-                    prefixText: '₹ ',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: salesmanCommCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Salesman Direct Commission (₹)',
-                    helperText: 'Earned when Salesman delivers order to customer',
-                    isDense: true,
-                    prefixText: '₹ ',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: referralCommCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Salesman Referral Bonus (₹)',
-                    helperText: 'Earned by direct 1-level upline referrer on sale',
-                    isDense: true,
-                    prefixText: '₹ ',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () async {
-                final storeAdminVal = double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
-                final fsmVal = double.tryParse(fsmCommCtrl.text) ?? 0.0;
-                final salesmanVal = double.tryParse(salesmanCommCtrl.text) ?? 0.0;
-                final referralVal = double.tryParse(referralCommCtrl.text) ?? 0.0;
-
-                final bodyData = {
-                  'name': product['name'],
-                  'sku': product['sku'],
-                  'category': product['category'],
-                  'unit': product['unit'],
-                  'base_price': product['base_price'],
-                  'min_stock_alert': product['min_stock_alert'],
-                  'is_active': product['is_active'] != false,
-                  'store_admin_commission': storeAdminVal,
-                  'fsm_commission': fsmVal,
-                  'salesman_commission': salesmanVal,
-                  'referral_commission': referralVal,
-                  'admin_id': AppState.currentUser?['id'],
-                  'admin_name': AppState.currentUser?['name'],
-                };
-
-                try {
-                  await http.put(
-                    Uri.parse('${AppState.apiBaseUrl}/products/${product['id']}'),
-                    headers: {'Content-Type': 'application/json'},
-                    body: jsonEncode(bodyData),
-                  );
-                  setState(() {
-                    product['store_admin_commission'] = storeAdminVal;
-                    product['fsm_commission'] = fsmVal;
-                    product['salesman_commission'] = salesmanVal;
-                    product['referral_commission'] = referralVal;
-                  });
-                  widget.onRefresh();
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Updated role commissions for "${product['name']}"'),
-                        backgroundColor: Colors.green.shade700,
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Base Pricing & Initial Stock Quota Row
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.blue.shade200),
                       ),
-                    );
-                  }
-                } catch (_) {
-                  setState(() {
-                    product['store_admin_commission'] = storeAdminVal;
-                    product['fsm_commission'] = fsmVal;
-                    product['salesman_commission'] = salesmanVal;
-                    product['referral_commission'] = referralVal;
-                  });
-                  if (ctx.mounted) Navigator.pop(ctx);
-                }
-              },
-              child: const Text('Save Commissions'),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'BASELINE PRICING & QUOTA',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: basePriceCtrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Base Price (₹) *',
+                                    prefixText: '₹ ',
+                                    isDense: true,
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (_) => setDlgState(() {}),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: TextField(
+                                  controller: initialStockCtrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Initial Stock *',
+                                    suffixText: 'units',
+                                    isDense: true,
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                  onChanged: (_) => setDlgState(() {}),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '💡 1st to $currentInit units sell at base price of ₹$currentBase each.',
+                            style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontStyle: FontStyle.italic),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Dynamic Over-Stock Commission Slabs Criteria (Option B)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.orange.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.trending_up, size: 18, color: Colors.orange.shade900),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'OVER-STOCK SURGE SLABS',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange.shade800,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: const Icon(Icons.add, size: 14),
+                                label: const Text('Add Slab', style: TextStyle(fontSize: 11)),
+                                onPressed: () {
+                                  setDlgState(() {
+                                    final lastTo = localSlabs.isNotEmpty
+                                        ? (int.tryParse(localSlabs.last['to_qty']?.toString() ?? '$currentInit') ?? currentInit)
+                                        : currentInit;
+                                    localSlabs.add({
+                                      'from_qty': lastTo + 1,
+                                      'to_qty': lastTo + 20,
+                                      'added_commission': 10.0,
+                                      'label': 'Tier ${localSlabs.length + 1} (+₹10)',
+                                    });
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (localSlabs.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Text(
+                                'No surge slabs added yet. Any units sold above $currentInit will remain at ₹$currentBase.',
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                              ),
+                            )
+                          else
+                            ...localSlabs.asMap().entries.map((entry) {
+                              final idx = entry.key;
+                              final slab = entry.value;
+                              final addedComm = double.tryParse(slab['added_commission']?.toString() ?? '0') ?? 0.0;
+                              final resultingPrice = currentBase + addedComm;
+
+                              final fromCtrl = TextEditingController(text: slab['from_qty']?.toString() ?? '');
+                              final toCtrl = TextEditingController(text: slab['to_qty']?.toString() ?? '');
+                              final commCtrl = TextEditingController(text: addedComm.toString());
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.shade100,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            'Slab ${idx + 1}',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.orange.shade900,
+                                            ),
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          'Effective Price: ₹${resultingPrice.toStringAsFixed(1)}/ea',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.green.shade900,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                                          visualDensity: VisualDensity.compact,
+                                          onPressed: () {
+                                            setDlgState(() => localSlabs.removeAt(idx));
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            controller: fromCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: 'From Qty',
+                                              isDense: true,
+                                            ),
+                                            keyboardType: TextInputType.number,
+                                            onChanged: (v) {
+                                              slab['from_qty'] = int.tryParse(v) ?? 0;
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: TextField(
+                                            controller: toCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: 'To Qty',
+                                              isDense: true,
+                                            ),
+                                            keyboardType: TextInputType.number,
+                                            onChanged: (v) {
+                                              slab['to_qty'] = int.tryParse(v) ?? 0;
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: TextField(
+                                            controller: commCtrl,
+                                            decoration: const InputDecoration(
+                                              labelText: '+ Comm (₹)',
+                                              prefixText: '₹',
+                                              isDense: true,
+                                            ),
+                                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                            onChanged: (v) {
+                                              final val = double.tryParse(v) ?? 0.0;
+                                              slab['added_commission'] = val;
+                                              slab['label'] = 'Tier ${idx + 1} (+₹$val)';
+                                              setDlgState(() {});
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Role Commissions Section
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade50.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.teal.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'ROLE COMMISSIONS (Per Unit Sold)',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: storeAdminCommCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Store Admin Commission (₹)',
+                              helperText: 'Earned when Store Admin dispatches stock to FSM',
+                              isDense: true,
+                              prefixText: '₹ ',
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: fsmCommCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'FSM Commission (₹)',
+                              helperText: 'Earned when FSM allocates stock to Salesman',
+                              isDense: true,
+                              prefixText: '₹ ',
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: salesmanCommCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Salesman Direct Commission (₹)',
+                              helperText: 'Earned when Salesman delivers order to customer',
+                              isDense: true,
+                              prefixText: '₹ ',
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: referralCommCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Salesman Referral Bonus (₹)',
+                              helperText: 'Earned by direct 1-level upline referrer on sale',
+                              isDense: true,
+                              prefixText: '₹ ',
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  final basePriceVal = double.tryParse(basePriceCtrl.text) ?? currentBase;
+                  final initialStockVal = int.tryParse(initialStockCtrl.text) ?? currentInit;
+                  final storeAdminVal = double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
+                  final fsmVal = double.tryParse(fsmCommCtrl.text) ?? 0.0;
+                  final salesmanVal = double.tryParse(salesmanCommCtrl.text) ?? 0.0;
+                  final referralVal = double.tryParse(referralCommCtrl.text) ?? 0.0;
+
+                  final bodyData = {
+                    'name': product['name'],
+                    'sku': product['sku'],
+                    'category': product['category'],
+                    'unit': product['unit'],
+                    'base_price': basePriceVal,
+                    'min_stock_alert': product['min_stock_alert'],
+                    'is_active': product['is_active'] != false,
+                    'initial_stock_quota': initialStockVal,
+                    'commission_slabs': localSlabs,
+                    'store_admin_commission': storeAdminVal,
+                    'fsm_commission': fsmVal,
+                    'salesman_commission': salesmanVal,
+                    'referral_commission': referralVal,
+                    'admin_id': AppState.currentUser?['id'],
+                    'admin_name': AppState.currentUser?['name'],
+                  };
+
+                  _customProductMeta[product['id'].toString()] = {
+                    'initial_stock_quota': initialStockVal,
+                    'commission_slabs': localSlabs,
+                    'store_admin_commission': storeAdminVal,
+                    'fsm_commission': fsmVal,
+                    'salesman_commission': salesmanVal,
+                    'referral_commission': referralVal,
+                  };
+
+                  try {
+                    await http.put(
+                      Uri.parse('${AppState.apiBaseUrl}/products/${product['id']}'),
+                      headers: {'Content-Type': 'application/json'},
+                      body: jsonEncode(bodyData),
+                    );
+                    setState(() {
+                      product['base_price'] = basePriceVal;
+                      product['initial_stock_quota'] = initialStockVal;
+                      product['commission_slabs'] = localSlabs;
+                      product['store_admin_commission'] = storeAdminVal;
+                      product['fsm_commission'] = fsmVal;
+                      product['salesman_commission'] = salesmanVal;
+                      product['referral_commission'] = referralVal;
+                    });
+                    widget.onRefresh();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Updated pricing slabs & commissions for "${product['name']}"'),
+                          backgroundColor: Colors.green.shade700,
+                        ),
+                      );
+                    }
+                  } catch (_) {
+                    setState(() {
+                      product['base_price'] = basePriceVal;
+                      product['initial_stock_quota'] = initialStockVal;
+                      product['commission_slabs'] = localSlabs;
+                      product['store_admin_commission'] = storeAdminVal;
+                      product['fsm_commission'] = fsmVal;
+                      product['salesman_commission'] = salesmanVal;
+                      product['referral_commission'] = referralVal;
+                    });
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  }
+                },
+                child: const Text('Save Slabs & Criteria'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
   void _showCommissionBottomSheet(Map<String, dynamic> product) {
-    final basePrice = double.tryParse(product['base_price']?.toString() ?? '0') ?? 0.0;
-    final storeAdminComm = double.tryParse(product['store_admin_commission']?.toString() ?? '0') ?? 0.0;
-    final fsmComm = double.tryParse(product['fsm_commission']?.toString() ?? '0') ?? 0.0;
-    final salesmanComm = double.tryParse(product['salesman_commission']?.toString() ?? '0') ?? 0.0;
-    final referralComm = double.tryParse(product['referral_commission']?.toString() ?? '0') ?? 0.0;
+    final basePrice = double.tryParse(product['base_price']?.toString() ?? '50') ?? 50.0;
+    final initialStock = getProductInitialQuota(product);
+    final storeAdminComm = getRoleComm(product, 'store_admin_commission');
+    final fsmComm = getRoleComm(product, 'fsm_commission');
+    final salesmanComm = getRoleComm(product, 'salesman_commission');
+    final referralComm = getRoleComm(product, 'referral_commission');
     final totalComm = storeAdminComm + fsmComm + salesmanComm + referralComm;
     final netRealization = basePrice > totalComm ? (basePrice - totalComm) : 0.0;
 
-    // Filter tier prices for this product
+    final slabs = getProductSlabs(product);
+
     final prodTierPrices = widget.prices.where((p) => p['product_id'] == product['id']).toList();
 
     showModalBottomSheet(
@@ -864,16 +1308,17 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.edit, color: AppColors.primary),
-                    tooltip: 'Edit Commissions',
+                    icon: const Icon(Icons.tune, color: AppColors.primary),
+                    tooltip: 'Edit Slabs & Criteria',
                     onPressed: () {
                       Navigator.pop(ctx);
-                      _showEditCommissionDialog(product);
+                      _showEditCommissionAndSlabsDialog(product);
                     },
                   ),
                 ],
               ),
               const SizedBox(height: 14),
+
               // Summary Banner
               Container(
                 padding: const EdgeInsets.all(12),
@@ -892,20 +1337,19 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   children: [
                     _metricCol('Base Price', '₹${basePrice.toStringAsFixed(0)}', AppColors.textPrimary),
                     Container(height: 30, width: 1, color: Colors.grey.shade300),
-                    _metricCol(
-                      'Commission Pool',
-                      '₹${totalComm.toStringAsFixed(1)}',
-                      Colors.deepOrange.shade800,
-                      subText: '${basePrice > 0 ? (totalComm / basePrice * 100).toStringAsFixed(1) : 0}%',
-                    ),
+                    _metricCol('Initial Quota', '$initialStock ${product['unit'] ?? 'units'}', Colors.blue.shade900),
                     Container(height: 30, width: 1, color: Colors.grey.shade300),
-                    _metricCol('Company Net', '₹${netRealization.toStringAsFixed(1)}', Colors.green.shade800),
+                    _metricCol('Roles Pool', '₹${totalComm.toStringAsFixed(1)}', Colors.deepOrange.shade800),
+                    Container(height: 30, width: 1, color: Colors.grey.shade300),
+                    _metricCol('Net Realization', '₹${netRealization.toStringAsFixed(1)}', Colors.green.shade800),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Dynamic Over-Stock Commission Slabs Section
               const Text(
-                'ROLE-WISE COMMISSION MATRIX',
+                'DYNAMIC OVER-STOCK COMMISSION SLABS',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -913,7 +1357,88 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   color: AppColors.textSecondary,
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
+
+              // Baseline slab
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_outline, size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '1 to $initialStock ${product['unit'] ?? 'units'} (Base Quota)',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Text(
+                      '₹${basePrice.toStringAsFixed(1)} / ea',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Over-quota slabs
+              ...slabs.asMap().entries.map((e) {
+                final idx = e.key;
+                final s = e.value;
+                final added = double.tryParse(s['added_commission']?.toString() ?? '0') ?? 0.0;
+                final effectiveP = basePrice + added;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.trending_up, size: 16, color: Colors.amber.shade900),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Units ${s['from_qty']} to ${s['to_qty']} (Slab ${idx + 1})',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              '₹$basePrice base + ₹$added commission',
+                              style: TextStyle(fontSize: 10.5, color: Colors.amber.shade900),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        '₹${effectiveP.toStringAsFixed(1)} / ea',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green.shade900),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 16),
+              const Text(
+                'ROLE-WISE COMMISSION SPLIT',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 8),
               _buildRoleItemCard(
                 roleName: 'Store Admin',
                 roleSubtitle: 'Warehouse / Hub Manager',
@@ -954,6 +1479,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 color: Colors.purple,
                 icon: Icons.share_outlined,
               ),
+
               if (prodTierPrices.isNotEmpty) ...[
                 const SizedBox(height: 14),
                 const Text(
@@ -1002,11 +1528,11 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  icon: const Icon(Icons.edit_note, size: 20),
-                  label: const Text('Update Role Commissions', style: TextStyle(fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.tune, size: 20),
+                  label: const Text('Configure Slabs & Commissions', style: TextStyle(fontWeight: FontWeight.bold)),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    _showEditCommissionDialog(product);
+                    _showEditCommissionAndSlabsDialog(product);
                   },
                 ),
               ),
@@ -1027,7 +1553,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
         const SizedBox(height: 3),
         Text(
           val,
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
+          style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: color),
         ),
         if (subText != null)
           Text(
@@ -1178,7 +1704,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
     );
   }
 
-  // Commissions Tab View
+  // Commissions Tab View (Option B Implementation)
   Widget _buildCommissionsTab(List<Map<String, dynamic>> products) {
     final query = _commissionSearchQuery.toLowerCase().trim();
     final filtered = products.where((p) {
@@ -1201,7 +1727,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
               TextField(
                 controller: _commissionSearchCtrl,
                 decoration: InputDecoration(
-                  hintText: 'Search products for role commissions...',
+                  hintText: 'Search products for slabs & commissions...',
                   prefixIcon: const Icon(Icons.search, size: 20),
                   suffixIcon: _commissionSearchQuery.isNotEmpty
                       ? IconButton(
@@ -1240,11 +1766,11 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.touch_app_outlined, size: 16, color: AppColors.primary),
+                    const Icon(Icons.tune, size: 16, color: AppColors.primary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Click any product to expand role commissions (Store Admin, FSM, Salesman, Referral).',
+                        'Click any product to view its Initial Stock Baseline, Over-Quota Slabs, and Role Commissions.',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
@@ -1297,13 +1823,14 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                     final pId = p['id']?.toString() ?? 'prod_$idx';
                     final isExpanded = _expandedCommissionProductIds.contains(pId);
 
-                    final basePrice = double.tryParse(p['base_price']?.toString() ?? '0') ?? 0.0;
-                    final storeAdminComm = double.tryParse(p['store_admin_commission']?.toString() ?? '0') ?? 0.0;
-                    final fsmComm = double.tryParse(p['fsm_commission']?.toString() ?? '0') ?? 0.0;
-                    final salesmanComm = double.tryParse(p['salesman_commission']?.toString() ?? '0') ?? 0.0;
-                    final referralComm = double.tryParse(p['referral_commission']?.toString() ?? '0') ?? 0.0;
-                    final totalComm = storeAdminComm + fsmComm + salesmanComm + referralComm;
-                    final commPercent = basePrice > 0 ? (totalComm / basePrice * 100) : 0.0;
+                    final basePrice = double.tryParse(p['base_price']?.toString() ?? '50') ?? 50.0;
+                    final initialStock = getProductInitialQuota(p);
+                    final storeAdminComm = getRoleComm(p, 'store_admin_commission');
+                    final fsmComm = getRoleComm(p, 'fsm_commission');
+                    final salesmanComm = getRoleComm(p, 'salesman_commission');
+                    final referralComm = getRoleComm(p, 'referral_commission');
+
+                    final slabs = getProductSlabs(p);
 
                     return Card(
                       color: AppColors.cardBg,
@@ -1410,37 +1937,37 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                               ),
                               const SizedBox(height: 10),
 
-                              // Total Commission Summary Row
+                              // Baseline & Slabs Summary Row
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Colors.orange.shade50.withValues(alpha: 0.6),
+                                  color: Colors.blue.shade50,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.orange.shade200),
+                                  border: Border.all(color: Colors.blue.shade200),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Row(
                                       children: [
-                                        Icon(Icons.pie_chart_outline, size: 14, color: Colors.orange.shade900),
+                                        Icon(Icons.inventory_outlined, size: 14, color: Colors.blue.shade900),
                                         const SizedBox(width: 5),
                                         Text(
-                                          'Total Commission Pool:',
+                                          'Initial Stock: $initialStock ${p['unit'] ?? 'units'}',
                                           style: TextStyle(
                                             fontSize: 11.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.orange.shade900,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue.shade900,
                                           ),
                                         ),
                                       ],
                                     ),
                                     Text(
-                                      '₹${totalComm.toStringAsFixed(1)} / ${p['unit'] ?? 'unit'} (${commPercent.toStringAsFixed(1)}%)',
+                                      '${slabs.length} Surge Slabs Active',
                                       style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange.shade900,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.blue.shade800,
                                       ),
                                     ),
                                   ],
@@ -1460,9 +1987,134 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                 ],
                               ),
 
-                              // Role Commission Breakdown View on click
+                              // Option B: Expanded Details View on Click
                               if (isExpanded) ...[
                                 const Divider(height: 20),
+
+                                // Slabs Breakdown Table
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text(
+                                      'PROGRESSIVE SLAB-BASED PRICING',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.textSecondary,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Marginal Rates',
+                                      style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+
+                                // Baseline Quota Card (1 to initialStock)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50.withValues(alpha: 0.7),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.blue.shade200),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.check_circle_outline, size: 16, color: AppColors.primary),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '1 to $initialStock ${p['unit'] ?? 'units'} (Initial Stock Quota)',
+                                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                            ),
+                                            Text(
+                                              'Standard defined rate (+₹0 added)',
+                                              style: TextStyle(fontSize: 10, color: Colors.blue.shade800),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        '₹${basePrice.toStringAsFixed(1)} / ea',
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Over-quota Slabs Cards
+                                if (slabs.isEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    margin: const EdgeInsets.only(bottom: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade100,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Text(
+                                      'No surge slabs defined. Sales above initial stock will sell at Base Price.',
+                                      style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic),
+                                    ),
+                                  )
+                                else
+                                  ...slabs.asMap().entries.map((e) {
+                                    final sIdx = e.key;
+                                    final s = e.value;
+                                    final added = double.tryParse(s['added_commission']?.toString() ?? '0') ?? 0.0;
+                                    final effectiveP = basePrice + added;
+
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.amber.shade300),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.trending_up, size: 16, color: Colors.amber.shade900),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'Units ${s['from_qty']} to ${s['to_qty']} (Slab ${sIdx + 1})',
+                                                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                                ),
+                                                Text(
+                                                  '₹$basePrice base + ₹$added added commission',
+                                                  style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Text(
+                                            '₹${effectiveP.toStringAsFixed(1)} / ea',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.green.shade900,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+
+                                const SizedBox(height: 12),
+                                // Respective Roles Commissions Section
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
@@ -1481,7 +2133,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 10),
+                                const SizedBox(height: 8),
                                 _buildRoleItemCard(
                                   roleName: 'Store Admin (Warehouse Admin)',
                                   roleSubtitle: 'Dispatch & Stock Hub Execution',
@@ -1547,9 +2199,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                           foregroundColor: Colors.white,
                                           padding: const EdgeInsets.symmetric(vertical: 8),
                                         ),
-                                        icon: const Icon(Icons.edit, size: 15),
-                                        label: const Text('Edit Commissions', style: TextStyle(fontSize: 12)),
-                                        onPressed: () => _showEditCommissionDialog(p),
+                                        icon: const Icon(Icons.tune, size: 15),
+                                        label: const Text('Edit Criteria & Slabs', style: TextStyle(fontSize: 12)),
+                                        onPressed: () => _showEditCommissionAndSlabsDialog(p),
                                       ),
                                     ),
                                   ],
@@ -1621,9 +2273,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                     FilterChip(
                       selected: _productAvailabilityFilter == 'all',
                       label: Text('All (${products.length})'),
-                      selectedColor: AppColors.primary.withValues(
-                        alpha: 0.15,
-                      ),
+                      selectedColor: AppColors.primary.withValues(alpha: 0.15),
                       checkmarkColor: AppColors.primary,
                       labelStyle: TextStyle(
                         fontSize: 12,
@@ -1672,8 +2322,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                       checkmarkColor: Colors.red.shade800,
                       labelStyle: TextStyle(
                         fontSize: 12,
-                        fontWeight:
-                            _productAvailabilityFilter == 'not_available'
+                        fontWeight: _productAvailabilityFilter == 'not_available'
                             ? FontWeight.bold
                             : FontWeight.normal,
                         color: _productAvailabilityFilter == 'not_available'
@@ -1739,6 +2388,8 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   itemBuilder: (ctx, idx) {
                     final p = filteredProducts[idx];
                     final isAvail = p['is_active'] != false;
+                    final initialStock = getProductInitialQuota(p);
+                    final slabs = getProductSlabs(p);
 
                     return Card(
                       color: AppColors.cardBg,
@@ -1747,9 +2398,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                         side: BorderSide(
-                          color: isAvail
-                              ? Colors.transparent
-                              : Colors.red.shade200,
+                          color: isAvail ? Colors.transparent : Colors.red.shade200,
                           width: isAvail ? 0 : 1.2,
                         ),
                       ),
@@ -1764,17 +2413,14 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         p['name'] ?? '',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16,
-                                          color: isAvail
-                                              ? AppColors.textPrimary
-                                              : Colors.grey.shade600,
+                                          color: isAvail ? AppColors.textPrimary : Colors.grey.shade600,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
@@ -1783,18 +2429,11 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                         runSpacing: 4,
                                         children: [
                                           Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 7,
-                                                  vertical: 2,
-                                                ),
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: Colors.brown.shade50,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                              border: Border.all(
-                                                color: Colors.brown.shade200,
-                                              ),
+                                              borderRadius: BorderRadius.circular(4),
+                                              border: Border.all(color: Colors.brown.shade200),
                                             ),
                                             child: Text(
                                               'SKU: ${p['sku']}',
@@ -1806,35 +2445,24 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                             ),
                                           ),
                                           Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 7,
-                                                  vertical: 2,
-                                                ),
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: Colors.blueGrey.shade50,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
+                                              borderRadius: BorderRadius.circular(4),
                                             ),
                                             child: Text(
                                               p['category'] ?? 'General',
                                               style: TextStyle(
                                                 fontSize: 10.5,
-                                                color:
-                                                    Colors.blueGrey.shade800,
+                                                color: Colors.blueGrey.shade800,
                                               ),
                                             ),
                                           ),
                                           Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 7,
-                                                  vertical: 2,
-                                                ),
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: Colors.orange.shade50,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
+                                              borderRadius: BorderRadius.circular(4),
                                             ),
                                             child: Text(
                                               'Unit: ${p['unit']}',
@@ -1852,44 +2480,29 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                 const SizedBox(width: 8),
                                 // Status Badge
                                 Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: isAvail
-                                        ? Colors.green.shade50
-                                        : Colors.red.shade50,
+                                    color: isAvail ? Colors.green.shade50 : Colors.red.shade50,
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: isAvail
-                                          ? Colors.green.shade300
-                                          : Colors.red.shade300,
+                                      color: isAvail ? Colors.green.shade300 : Colors.red.shade300,
                                     ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Icon(
-                                        isAvail
-                                            ? Icons.check_circle
-                                            : Icons.do_not_disturb_on,
+                                        isAvail ? Icons.check_circle : Icons.do_not_disturb_on,
                                         size: 12,
-                                        color: isAvail
-                                            ? Colors.green.shade800
-                                            : Colors.red.shade800,
+                                        color: isAvail ? Colors.green.shade800 : Colors.red.shade800,
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
-                                        isAvail
-                                            ? 'AVAILABLE'
-                                            : 'NOT AVAILABLE',
+                                        isAvail ? 'AVAILABLE' : 'NOT AVAILABLE',
                                         style: TextStyle(
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
-                                          color: isAvail
-                                              ? Colors.green.shade800
-                                              : Colors.red.shade800,
+                                          color: isAvail ? Colors.green.shade800 : Colors.red.shade800,
                                         ),
                                       ),
                                     ],
@@ -1899,7 +2512,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                             ),
                             const SizedBox(height: 10),
 
-                            // Pricing & Low Stock Indicator
+                            // Pricing & Initial Stock Quota Row
                             Row(
                               children: [
                                 Text(
@@ -1910,12 +2523,29 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                     color: AppColors.primary,
                                   ),
                                 ),
+                                const SizedBox(width: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.blue.shade200),
+                                  ),
+                                  child: Text(
+                                    'Initial Quota: $initialStock ${p['unit']}',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.blue.shade900,
+                                    ),
+                                  ),
+                                ),
                                 const Spacer(),
                                 Text(
-                                  'Low Stock Alert: < ${p['min_stock_alert'] ?? 20} ${p['unit']}',
+                                  'Alert: < ${p['min_stock_alert'] ?? 20} ${p['unit']}',
                                   style: TextStyle(
                                     color: Colors.amber.shade900,
-                                    fontSize: 11.5,
+                                    fontSize: 11,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -1923,11 +2553,35 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                             ),
                             const SizedBox(height: 8),
 
-                            // Dynamic Per-Product Commission Chips
+                            // Slabs tag & Dynamic Commission Badges
                             Wrap(
                               spacing: 6,
                               runSpacing: 4,
                               children: [
+                                if (slabs.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.amber.shade300, width: 0.8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.trending_up, size: 12, color: Colors.amber.shade900),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${slabs.length} Slabs Configured',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.amber.shade900,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 _commissionBadge('Store Admin', '₹${p['store_admin_commission'] ?? 0}', Colors.teal),
                                 _commissionBadge('FSM', '₹${p['fsm_commission'] ?? 0}', Colors.indigo),
                                 _commissionBadge('Salesman', '₹${p['salesman_commission'] ?? 0}', Colors.deepOrange),
@@ -1938,28 +2592,18 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
 
                             // Availability Toggle Banner
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
                                 color: isAvail
-                                    ? Colors.green.shade50.withValues(
-                                        alpha: 0.6,
-                                      )
-                                    : Colors.red.shade50.withValues(
-                                        alpha: 0.6,
-                                      ),
+                                    ? Colors.green.shade50.withValues(alpha: 0.6)
+                                    : Colors.red.shade50.withValues(alpha: 0.6),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: isAvail
-                                      ? Colors.green.shade200
-                                      : Colors.red.shade200,
+                                  color: isAvail ? Colors.green.shade200 : Colors.red.shade200,
                                 ),
                               ),
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Expanded(
                                     child: Text(
@@ -1969,9 +2613,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: isAvail
-                                            ? Colors.green.shade900
-                                            : Colors.red.shade900,
+                                        color: isAvail ? Colors.green.shade900 : Colors.red.shade900,
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -1983,9 +2625,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                         isAvail ? 'Available' : 'Unavailable',
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: isAvail
-                                              ? Colors.green.shade800
-                                              : Colors.red.shade800,
+                                          color: isAvail ? Colors.green.shade800 : Colors.red.shade800,
                                         ),
                                       ),
                                       Transform.scale(
@@ -1994,11 +2634,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                           value: isAvail,
                                           activeThumbColor: Colors.green,
                                           inactiveThumbColor: Colors.red,
-                                          onChanged: (val) =>
-                                              _toggleProductAvailability(
-                                                p,
-                                                val,
-                                              ),
+                                          onChanged: (val) => _toggleProductAvailability(p, val),
                                         ),
                                       ),
                                     ],
@@ -2015,42 +2651,25 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                   child: OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: AppColors.accent,
-                                      side: const BorderSide(
-                                        color: AppColors.accent,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 8,
-                                      ),
+                                      side: const BorderSide(color: AppColors.accent),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                     ),
                                     icon: const Icon(Icons.sell, size: 15),
                                     label: const Text(
                                       'Set Role & Bulk Prices',
                                       style: TextStyle(fontSize: 12),
                                     ),
-                                    onPressed: () =>
-                                        _showTieredPricingDialog(p),
+                                    onPressed: () => _showTieredPricingDialog(p),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 IconButton(
-                                  icon: const Icon(
-                                    Icons.edit,
-                                    size: 20,
-                                    color: Colors.blue,
-                                  ),
+                                  icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
                                   tooltip: 'Edit Product Details',
-                                  onPressed: () =>
-                                      _showAddOrEditProductDialog(
-                                        editProduct: p,
-                                      ),
+                                  onPressed: () => _showAddOrEditProductDialog(editProduct: p),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 20,
-                                    color: Colors.red,
-                                  ),
+                                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
                                   tooltip: 'Delete Product',
                                   onPressed: () => _confirmDeleteProduct(p),
                                 ),
@@ -2070,12 +2689,8 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
   @override
   Widget build(BuildContext context) {
     final products = widget.products;
-    final availableCount = products
-        .where((p) => p['is_active'] != false)
-        .length;
-    final notAvailableCount = products
-        .where((p) => p['is_active'] == false)
-        .length;
+    final availableCount = products.where((p) => p['is_active'] != false).length;
+    final notAvailableCount = products.where((p) => p['is_active'] == false).length;
 
     // Filter products by search and availability for Catalog tab
     final filteredProducts = products.where((p) {
@@ -2084,8 +2699,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
       final cat = (p['category'] ?? '').toString().toLowerCase();
       final query = _productSearchQuery.toLowerCase().trim();
 
-      final matchesQuery =
-          query.isEmpty ||
+      final matchesQuery = query.isEmpty ||
           name.contains(query) ||
           sku.contains(query) ||
           cat.contains(query);

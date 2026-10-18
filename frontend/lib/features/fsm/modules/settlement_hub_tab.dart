@@ -22,6 +22,9 @@ class SettlementHubTab extends StatelessWidget {
     final wh = (settlementHub['warehouse'] as Map<String, dynamic>?) ?? {};
     final teamSettlements = (settlementHub['team_settlement'] as List?) ?? [];
     final pendingSettlements = (settlementHub['pending_settlements'] as List?) ?? [];
+    final int settledCount = teamSettlements.where((ts) => ts['status'] == 'settled').length;
+    final int totalTeam = teamSettlements.length;
+    final String settlementRatioText = totalTeam > 0 ? '$settledCount/$totalTeam Settled' : 'All Settled';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -352,9 +355,9 @@ class SettlementHubTab extends StatelessWidget {
                   color: const Color(0xFFE6F4EA),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Text(
-                  '4/5 Settled',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF137333)),
+                child: Text(
+                  settlementRatioText,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF137333)),
                 ),
               ),
             ],
@@ -363,8 +366,18 @@ class SettlementHubTab extends StatelessWidget {
           const SizedBox(height: 12),
 
           // Team Settlement List
-          ...teamSettlements.map((ts) {
-            final String name = ts['name'] ?? 'Agent';
+          if (teamSettlements.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              alignment: Alignment.center,
+              child: const Text(
+                'No team settlement records for today.',
+                style: TextStyle(fontSize: 13, color: ClientColors.textMuted),
+              ),
+            )
+          else
+            ...teamSettlements.map((ts) {
+              final String name = ts['name'] ?? 'Agent';
             final String status = ts['status'] ?? 'settled';
             final bool isSettled = status == 'settled';
             final int pendingAmount = (ts['pending_amount'] as num?)?.toInt() ?? 0;

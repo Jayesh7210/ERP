@@ -290,24 +290,19 @@ class FsmSalesmanSettlementModal {
                             final code = pinController.text.trim();
                             if (code.isNotEmpty) {
                               final match = pendingSettlements.firstWhere(
-                                (s) => (s['security_pin'] ?? '').toString() == code,
-                                orElse: () => pendingSettlements.isNotEmpty
-                                    ? pendingSettlements.first
-                                    : {
-                                        'id': 'stl_pin_$code',
-                                        'salesman_id': 'u4',
-                                        'salesman_name': 'Ramesh Sharma',
-                                        'bottles_dispatched': 10,
-                                        'bottles_sold': 8,
-                                        'remaining_qty': 2,
-                                        'damaged_qty': 0,
-                                        'cash_received': 2808,
-                                        'online_payment': 0,
-                                        'security_pin': code,
-                                        'status': 'pending_fsm',
-                                      },
+                                (s) => (s['security_pin'] ?? '').toString() == code || (s['id'] ?? '').toString() == code,
+                                orElse: () => {},
                               );
-                              setSheetState(() => selected = match);
+                              if (match.isNotEmpty) {
+                                setSheetState(() => selected = match);
+                              } else {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid PIN. No pending settlement found for this PIN.'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -376,7 +371,8 @@ class FsmSalesmanSettlementModal {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(selected?['salesman_name'] ?? 'Salesman', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: ClientColors.textDark)),
-                                        Text('ID: ${selected?['salesman_id'] ?? 'u4'}', style: const TextStyle(fontSize: 10, color: ClientColors.textMuted)),
+                                        if (selected?['salesman_id'] != null)
+                                          Text('ID: ${selected!['salesman_id']}', style: const TextStyle(fontSize: 10, color: ClientColors.textMuted)),
                                       ],
                                     ),
                                   ],

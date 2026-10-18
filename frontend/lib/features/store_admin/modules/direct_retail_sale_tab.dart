@@ -261,13 +261,16 @@ class _DirectRetailSaleViewState extends State<DirectRetailSaleView> {
                 final qty = s['quantity'];
                 final pMethod = (s['payment_method'] ?? 'cash').toString().toUpperCase();
 
+                final prod = widget.products.firstWhere((p) => p['id']?.toString() == s['product_id']?.toString(), orElse: () => {});
+                final prodName = s['product']?['name'] ?? prod['name'] ?? '';
+
                 return Card(
                   color: Colors.white,
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
                     leading: const CircleAvatar(backgroundColor: Color(0xFFEDF7ED), child: Icon(Icons.receipt, color: Colors.green)),
                     title: Text('$custName • ₹$amt', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: Text('$qty units • $pMethod', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    subtitle: Text('$qty units${prodName.isNotEmpty ? ' • $prodName' : ''} • $pMethod', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                     trailing: const Icon(Icons.check_circle, color: Colors.green, size: 20),
                   ),
                 );

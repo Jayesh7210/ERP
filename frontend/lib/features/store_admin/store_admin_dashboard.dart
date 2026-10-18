@@ -72,6 +72,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   }
 
   // Data Stores (Warehouse Scoped)
+  String _activeWarehouseId = '';
+  String _activeWarehouseName = '';
   List<Map<String, dynamic>> _warehouseStocks = [];
   List<Map<String, dynamic>> _alerts = [];
   List<Map<String, dynamic>> _products = [];
@@ -85,7 +87,10 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   double _dispatchEarnings = 0.0;
   int _dispatchedUnits = 0;
 
-  String get _warehouseId => AppState.currentUser?['warehouse_id'] ?? 'w1';
+  String get _warehouseId => _activeWarehouseId.isNotEmpty
+      ? _activeWarehouseId
+      : (AppState.currentUser?['warehouse_id']?.toString() ?? '');
+  String get _warehouseName => _activeWarehouseName;
 
   @override
   void initState() {
@@ -97,6 +102,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
 
   Future<void> _loadAllStoreData() async {
     setState(() => _isLoading = true);
+    await _loadWarehouses();
     await Future.wait([
       _loadProductsAndPrices(),
       _loadWarehouseStock(),
@@ -106,8 +112,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       _loadFsmUsers(),
       _loadCustomers(),
       _loadSales(),
-      _loadEarnings(),
     ]);
+    _loadEarnings();
     if (mounted) setState(() => _isLoading = false);
 
     // Auto-sync pending offline transactions for store_admin
@@ -237,7 +243,29 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
     }
   }
 
+  Future<void> _loadWarehouses() async {
+    try {
+      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/warehouses'));
+      if (res.statusCode == 200) {
+        final list = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+        final assignedId = AppState.currentUser?['warehouse_id']?.toString();
+        final matched = list.firstWhere(
+          (w) => w['id']?.toString() == assignedId,
+          orElse: () => list.isNotEmpty ? list.first : {},
+        );
+        if (matched.isNotEmpty) {
+          _activeWarehouseId = matched['id'].toString();
+          _activeWarehouseName = matched['name']?.toString() ?? 'Warehouse Hub';
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadWarehouseStock() async {
+    if (_warehouseId.isEmpty) {
+      _warehouseStocks = [];
+      return;
+    }
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/$_warehouseId'));
       if (res.statusCode == 200) {
@@ -249,18 +277,39 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   }
 
   Future<void> _loadEarnings() async {
-    try {
-      final userId = AppState.currentUser?['id'] ?? 'u2';
-      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/store-admin/earnings/$userId'));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        _dispatchEarnings = (data['today_earned'] as num?)?.toDouble() ?? 0.0;
-        _dispatchedUnits = (data['units_dispatched'] as num?)?.toInt() ?? 0;
-      }
-    } catch (_) {
-      _dispatchEarnings = 0.0;
-      _dispatchedUnits = 0;
+    final userId = AppState.currentUser?['id'];
+    if (userId != null) {
+      try {
+        final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/store-admin/earnings/$userId'));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['today_earned'] != null) {
+            _dispatchEarnings = (data['today_earned'] as num?)?.toDouble() ?? 0.0;
+            _dispatchedUnits = (data['units_dispatched'] as num?)?.toInt() ?? 0;
+            return;
+          }
+        }
+      } catch (_) {}
     }
+
+    // Dynamic calculation from real completed outgoing transfers & product commission:
+    double earned = 0.0;
+    int units = 0;
+    for (final t in _transfers) {
+      final st = (t['status'] ?? '').toString().toLowerCase();
+      if (st == 'completed' || st == 'transferred' || st == 'accepted') {
+        final q = int.tryParse(t['quantity']?.toString() ?? '0') ?? 0;
+        units += q;
+        final prod = _products.firstWhere(
+          (p) => p['id']?.toString() == t['product_id']?.toString(),
+          orElse: () => {},
+        );
+        final commRate = double.tryParse(prod['store_admin_commission']?.toString() ?? '0') ?? 0.0;
+        earned += q * commRate;
+      }
+    }
+    _dispatchEarnings = earned;
+    _dispatchedUnits = units;
   }
 
   Future<void> _loadLowStockAlerts() async {
@@ -344,21 +393,19 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   }
 
   double _getRetailPriceForProduct(String productId) {
-    final prod = _products.firstWhere((p) => p['id'] == productId, orElse: () => {});
-    return (prod['base_price'] is num ? (prod['base_price'] as num).toDouble() : 500.0);
+    final prod = _products.firstWhere((p) => p['id']?.toString() == productId, orElse: () => {});
+    return double.tryParse(prod['base_price']?.toString() ?? '0') ?? 0.0;
   }
 
   double _getDistributorPriceForProduct(String productId) {
     final pr = _prices.firstWhere(
-      (p) => p['product_id'] == productId && p['role'] == 'distributor',
+      (p) => p['product_id']?.toString() == productId && p['role'] == 'distributor',
       orElse: () => {},
     );
     if (pr.isNotEmpty && pr['price'] != null) {
-      return (pr['price'] as num).toDouble();
+      return double.tryParse(pr['price'].toString()) ?? 0.0;
     }
-    // Fallback: 20% discount on base price
-    final base = _getRetailPriceForProduct(productId);
-    return base * 0.80;
+    return _getRetailPriceForProduct(productId);
   }
 
   String _getProductName(String productId) {
@@ -417,6 +464,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       case 0:
         return InventoryIntakeTab(
           warehouseId: _warehouseId,
+          warehouseName: _warehouseName,
           warehouseStocks: _warehouseStocks,
           alerts: _alerts,
           products: _products,
@@ -459,6 +507,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       case 4:
         return StoreReportsView(
           warehouseId: _warehouseId,
+          warehouseName: _warehouseName,
           intakes: _intakes,
           transfers: _transfers,
           sales: _sales,
@@ -469,6 +518,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       default:
         return InventoryIntakeTab(
           warehouseId: _warehouseId,
+          warehouseName: _warehouseName,
           warehouseStocks: _warehouseStocks,
           alerts: _alerts,
           products: _products,

@@ -261,13 +261,16 @@ class _DistributorSaleViewState extends State<DistributorSaleView> {
                 final qty = s['quantity'];
                 final pMethod = (s['payment_method'] ?? 'online').toString().toUpperCase();
 
+                final prod = widget.products.firstWhere((p) => p['id']?.toString() == s['product_id']?.toString(), orElse: () => {});
+                final prodName = s['product']?['name'] ?? prod['name'] ?? '';
+
                 return Card(
                   color: Colors.white,
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
                     leading: CircleAvatar(backgroundColor: Colors.purple.shade100, child: Icon(Icons.business, color: Colors.purple.shade800)),
                     title: Text('$distName • ₹$amt', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: Text('$qty units bulk order • $pMethod', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    subtitle: Text('$qty units bulk order${prodName.isNotEmpty ? ' • $prodName' : ''} • $pMethod', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                     trailing: const Icon(Icons.verified, color: Colors.purple, size: 20),
                   ),
                 );
@@ -318,7 +321,7 @@ class _DistributorSaleViewState extends State<DistributorSaleView> {
               backgroundColor: isOffline ? Colors.amber.shade800 : Colors.green,
             ),
           );
-          _qtyController.text = '50';
+          _qtyController.text = '1';
           if (_isNewDistributor) _distNameController.clear();
           widget.onSaleComplete();
         }

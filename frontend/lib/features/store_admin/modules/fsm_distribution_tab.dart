@@ -227,10 +227,13 @@ class _FsmDistributionViewState extends State<FsmDistributionView> {
               itemCount: widget.transfers.length,
               itemBuilder: (context, idx) {
                 final t = widget.transfers[idx];
-                final pName = t['product']?['name'] ?? 'Product #${t['product_id']}';
+                final prod = widget.products.firstWhere((p) => p['id']?.toString() == t['product_id']?.toString(), orElse: () => {});
+                final pName = t['product']?['name'] ?? prod['name'] ?? 'Product';
                 final qty = t['quantity'];
                 final date = t['created_at'] != null ? t['created_at'].toString().split('T').first : 'Today';
                 final destName = t['to_name'] ?? 'Field Sales Manager';
+                final status = (t['status'] ?? 'completed').toString().toUpperCase();
+                final isPending = status == 'PENDING';
 
                 return Card(
                   color: Colors.white,
@@ -244,8 +247,18 @@ class _FsmDistributionViewState extends State<FsmDistributionView> {
                     subtitle: Text('To: $destName • $date', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: Colors.green.shade100, borderRadius: BorderRadius.circular(8)),
-                      child: Text('TRANSFERRED', style: TextStyle(color: Colors.green.shade900, fontSize: 10, fontWeight: FontWeight.bold)),
+                      decoration: BoxDecoration(
+                        color: isPending ? Colors.amber.shade100 : Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(
+                          color: isPending ? Colors.amber.shade900 : Colors.green.shade900,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 );

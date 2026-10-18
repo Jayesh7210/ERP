@@ -11,6 +11,7 @@ import '../../../core/services/offline_sync_service.dart';
 // ==========================================
 class InventoryIntakeTab extends StatefulWidget {
   final String warehouseId;
+  final String warehouseName;
   final List<Map<String, dynamic>> warehouseStocks;
   final List<Map<String, dynamic>> alerts;
   final List<Map<String, dynamic>> products;
@@ -24,6 +25,7 @@ class InventoryIntakeTab extends StatefulWidget {
   const InventoryIntakeTab({
     super.key,
     required this.warehouseId,
+    this.warehouseName = '',
     required this.warehouseStocks,
     required this.alerts,
     required this.products,
@@ -52,7 +54,7 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
 
   // Stock Intake Bottom Sheet Modal
   void _showStockIntakeModal() {
-    String selectedProduct = widget.products.isNotEmpty ? widget.products.first['id'] : 'p1';
+    String selectedProduct = widget.products.isNotEmpty ? widget.products.first['id'].toString() : '';
     final qtyController = TextEditingController();
     final batchController = TextEditingController(text: 'BATCH-${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}');
     final supplierController = TextEditingController();
@@ -247,7 +249,7 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
 
                     TextField(
                       controller: supplierController,
-                      decoration: const InputDecoration(labelText: 'Supplier / Vendor Name', hintText: 'e.g., Atlas Coffee Exporters Ltd', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(labelText: 'Supplier / Vendor Name', hintText: 'e.g., Supplier / Vendor Name', border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 14),
 
@@ -618,10 +620,13 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Central Warehouse Hub', style: TextStyle(color: Colors.white70, fontSize: 13)),
                             Text(
-                              'Warehouse #${widget.warehouseId}',
-                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                              widget.warehouseName.isNotEmpty ? widget.warehouseName : 'Warehouse Hub',
+                              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Warehouse #${widget.warehouseId.length > 8 ? widget.warehouseId.substring(0, 8) : widget.warehouseId}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
                             ),
                           ],
                         ),
@@ -714,8 +719,8 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
               final product = widget.products[index];
               final pId = product['id'];
               final stock = widget.getStockForProduct(pId);
-              final minAlert = product['min_stock_alert'] ?? 20;
-              final isLow = stock <= minAlert;
+              final minAlert = int.tryParse(product['min_stock_alert']?.toString() ?? '0') ?? 0;
+              final isLow = widget.alerts.any((a) => a['product_id']?.toString() == pId?.toString()) || (minAlert > 0 && stock <= minAlert);
               final retailPrice = widget.getRetailPriceForProduct(pId);
               final distPrice = widget.getDistributorPriceForProduct(pId);
 

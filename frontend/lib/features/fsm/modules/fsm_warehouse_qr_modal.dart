@@ -49,7 +49,7 @@ class FsmWarehouseQrModal {
             Future<void> confirmReceipt(Map<String, dynamic> tr) async {
               setSheetState(() => isProcessing = true);
               final trId = tr['id']?.toString() ?? '';
-              final qty = (tr['quantity'] as num?)?.toInt() ?? 25;
+              final qty = (tr['quantity'] as num?)?.toInt() ?? 0;
               final prodName = tr['product']?['name'] ?? tr['product_name'] ?? 'Bottles';
 
               try {
@@ -274,19 +274,19 @@ class FsmWarehouseQrModal {
                           onPressed: () {
                             final pin = pinController.text.trim();
                             if (pin.isNotEmpty) {
-                              if (pendingTransfers.isNotEmpty) {
-                                setSheetState(() => selectedTransfer = pendingTransfers.first);
+                              final match = pendingTransfers.firstWhere(
+                                (t) => (t['security_pin'] ?? '').toString() == pin || (t['id'] ?? '').toString() == pin,
+                                orElse: () => {},
+                              );
+                              if (match.isNotEmpty) {
+                                setSheetState(() => selectedTransfer = match);
                               } else {
-                                setSheetState(() {
-                                  selectedTransfer = {
-                                    'id': 'tr_pin_${DateTime.now().millisecondsSinceEpoch}',
-                                    'from_name': 'Central Warehouse Hub',
-                                    'product': {'name': 'Water Bottle', 'sku': 'WB-20L'},
-                                    'quantity': 25,
-                                    'status': 'pending',
-                                    'created_at': DateTime.now().toIso8601String(),
-                                  };
-                                });
+                                ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('No pending stock transfer found matching this PIN.'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
                               }
                             }
                           },

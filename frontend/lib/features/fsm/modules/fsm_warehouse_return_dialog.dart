@@ -8,21 +8,26 @@ class FsmWarehouseReturnDialog {
   static Future<void> show({
     required BuildContext context,
     required String fsmId,
+    int availableDepotStock = 0,
   }) async {
-    String returnCode = 'WR-RET-88492';
-    int returnQty = 500;
+    String returnCode = '';
+    int returnQty = availableDepotStock > 0 ? availableDepotStock : 0;
     try {
       final res = await http.post(
         Uri.parse('${AppState.apiBaseUrl}/fsm/warehouse-return-qr'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'fsm_id': fsmId, 'quantity': 500}),
+        body: jsonEncode({'fsm_id': fsmId, 'quantity': returnQty}),
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        returnCode = data['return_code'] ?? 'WR-RET-88492';
-        returnQty = data['quantity'] ?? 500;
+        returnCode = (data['return_code'] ?? data['qr_token'] ?? '').toString();
+        returnQty = (data['quantity'] as num?)?.toInt() ?? returnQty;
       }
     } catch (_) {}
+
+    if (returnCode.isEmpty) {
+      returnCode = 'WR-RET-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+    }
 
     if (!context.mounted) return;
 

@@ -24,6 +24,7 @@ class ManagerDashboardTab extends StatelessWidget {
     final teamSales = (dashboardData['team_sales'] as Map<String, dynamic>?) ?? {};
     final stockAcc = (dashboardData['stock_accountability'] as Map<String, dynamic>?) ?? {};
     final topPerformers = (dashboardData['top_performers'] as List?) ?? [];
+    final whName = AppState.currentUser?['warehouse_name'] ?? AppState.currentUser?['warehouse']?['name'];
 
     return RefreshIndicator(
       color: ClientColors.primary,
@@ -81,8 +82,8 @@ class ManagerDashboardTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          AppState.currentUser?['warehouse_name'] != null
-                              ? 'Assigned to ${AppState.currentUser!['warehouse_name']}'
+                          whName != null
+                              ? 'Assigned to $whName'
                               : 'Field Sales Operations',
                           style: const TextStyle(fontSize: 12, color: ClientColors.textMuted),
                         ),
@@ -264,11 +265,20 @@ class ManagerDashboardTab extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  ...topPerformers.map((p) {
-                    final rank = p['rank'] ?? 1;
-                    final name = p['name'] ?? '';
-                    final bottles = p['bottles'] ?? 0;
-                    final hasTrophy = p['has_trophy'] == true;
+                  if (topPerformers.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        'No team sales recorded today yet.',
+                        style: TextStyle(fontSize: 12, color: ClientColors.textMuted),
+                      ),
+                    )
+                  else
+                    ...topPerformers.map((p) {
+                      final rank = p['rank'] ?? 1;
+                      final name = p['name'] ?? '';
+                      final bottles = p['bottles'] ?? 0;
+                      final hasTrophy = p['has_trophy'] == true;
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 6),

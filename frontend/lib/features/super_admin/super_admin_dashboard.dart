@@ -279,13 +279,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           setState(() {
             _payments.clear();
             if (data['payments'] is List) {
-              _payments.addAll(
-                (data['payments'] as List).cast<Map<String, dynamic>>(),
-              );
+              final raw = (data['payments'] as List).cast<Map<String, dynamic>>();
+              _payments.addAll(raw.where((p) => !PaymentsHistoryModule.isStaticPayment(p)));
             }
-            if (data['summary'] is Map<String, dynamic>) {
-              _paymentsSummary = data['summary'];
-            }
+            _recalculatePaymentsSummary();
           });
           return;
         }
@@ -295,6 +292,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     // Fallback synthesis if offline
     final List<Map<String, dynamic>> synthesized = [];
     for (final s in _sales) {
+      if ((s['id'] ?? '').toString().startsWith('sale_10')) continue;
       synthesized.add({
         'id': 'pay_${s['id']}',
         'payment_no':
@@ -352,11 +350,19 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       });
     }
 
+    setState(() {
+      _payments.clear();
+      _payments.addAll(synthesized.where((p) => !PaymentsHistoryModule.isStaticPayment(p)));
+      _recalculatePaymentsSummary();
+    });
+  }
+
+  void _recalculatePaymentsSummary() {
     double totalVol = 0.0;
     double onlineVol = 0.0;
     double cashVol = 0.0;
     double payoutsVol = 0.0;
-    for (final p in synthesized) {
+    for (final p in _payments) {
       final amt = double.tryParse(p['amount']?.toString() ?? '0') ?? 0.0;
       totalVol += amt;
       if (p['payment_method'] == 'online' || p['payment_method'] == 'upi') {
@@ -368,19 +374,14 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
         payoutsVol += amt;
       }
     }
-
-    setState(() {
-      _payments.clear();
-      _payments.addAll(synthesized);
-      _paymentsSummary = {
-        'total_volume': totalVol,
-        'total_collected': totalVol - payoutsVol,
-        'online_total': onlineVol,
-        'cash_total': cashVol,
-        'payouts_total': payoutsVol,
-        'count': synthesized.length,
-      };
-    });
+    _paymentsSummary = {
+      'total_volume': totalVol,
+      'total_collected': totalVol - payoutsVol,
+      'online_total': onlineVol,
+      'cash_total': cashVol,
+      'payouts_total': payoutsVol,
+      'count': _payments.length,
+    };
   }
 
   Future<void> _loadWorkforce() async {
