@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/state/app_state.dart';
 import '../../../core/services/offline_sync_service.dart';
+import '../../../core/widgets/live_qr_scanner_modal.dart';
 
 class FsmSalesmanSettlementModal {
   static void open({
@@ -96,10 +97,60 @@ class FsmSalesmanSettlementModal {
               }
             }
 
+            Future<void> openLiveScanner() async {
+              final raw = await LiveQrScannerModal.show(
+                context: context,
+                title: 'Scan Salesman Settlement QR',
+                subtitle: 'Point camera at Salesman\'s settlement QR code',
+              );
+              if (raw == null || raw.trim().isEmpty) return;
+
+              String extractedPin = raw.trim();
+              String? extractedId;
+
+              try {
+                final decoded = jsonDecode(raw);
+                if (decoded is Map) {
+                  extractedPin = decoded['security_pin']?.toString() ?? decoded['pin']?.toString() ?? extractedPin;
+                  extractedId = decoded['settlement_id']?.toString() ?? decoded['id']?.toString();
+                }
+              } catch (_) {}
+
+              final match = pendingSettlements.cast<Map<String, dynamic>?>().firstWhere(
+                (s) =>
+                    (extractedId != null && s?['id']?.toString() == extractedId) ||
+                    s?['security_pin']?.toString() == extractedPin ||
+                    s?['id']?.toString() == extractedPin ||
+                    s?['id']?.toString().endsWith(extractedPin) == true,
+                orElse: () => null,
+              );
+
+              if (match != null) {
+                setSheetState(() => selected = match);
+                messenger.showSnackBar(
+                  SnackBar(
+                    backgroundColor: ClientColors.success,
+                    content: Text('✓ Verified settlement from ${match['salesman_name'] ?? 'Salesman'}!'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              } else if (pendingSettlements.isNotEmpty) {
+                setSheetState(() => selected = pendingSettlements.first);
+              } else {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('No pending settlement found matching scanned code: $extractedPin'),
+                    backgroundColor: Colors.orange.shade800,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
+            }
+
             Future<void> pickAndSimulateScan(ImageSource source) async {
               try {
                 final picker = ImagePicker();
-                final img = await picker.pickImage(source: source, imageQuality: 80);
+                final img = await picker.pickImage(source: source, imageQuality: 75, maxWidth: 1280, maxHeight: 1280);
                 if (img != null) {
                   setSheetState(() => isVerifying = true);
                   await Future.delayed(const Duration(milliseconds: 600));
@@ -126,7 +177,7 @@ class FsmSalesmanSettlementModal {
             final int cashAmt = (selected?['cash_received'] ?? selected?['cash_collected'] ?? 0);
             final int onlineAmt = (selected?['online_payment'] ?? 0);
             final int totalCollected = cashAmt + onlineAmt;
-            final int dispBtls = (selected?['bottles_dispatched'] as num?)?.toInt() ?? 10;
+            final int dispBtls = (selected?['bottles_dispatched'] as num?)?.toInt() ?? (soldBtls + retBtls + dmgBtls);
             final String? damageBase64 = selected?['damage_image_base64'];
             final String? damageUrl = selected?['damage_image_url'];
 
@@ -178,59 +229,89 @@ class FsmSalesmanSettlementModal {
                     ),
                     const SizedBox(height: 14),
 
-                    // Viewfinder Container
-                    Container(
-                      height: 160,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF131E2E),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFF60A5FA), width: 1.5),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 4)),
-                        ],
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                isVerifying ? Icons.sync : Icons.qr_code_2,
-                                size: 68,
-                                color: isVerifying ? const Color(0xFF60A5FA) : Colors.white70,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                isVerifying ? 'Scanning Settlement QR...' : 'Align Salesman Settlement QR in Viewfinder',
-                                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
-                              ),
-                            ],
-                          ),
-                          Positioned(
-                            top: 12,
-                            left: 12,
-                            child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF60A5FA), width: 3), left: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
-                          ),
-                          Positioned(
-                            top: 12,
-                            right: 12,
-                            child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF60A5FA), width: 3), right: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
-                          ),
-                          Positioned(
-                            bottom: 12,
-                            left: 12,
-                            child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF60A5FA), width: 3), left: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
-                          ),
-                          Positioned(
-                            bottom: 12,
-                            right: 12,
-                            child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF60A5FA), width: 3), right: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
-                          ),
-                        ],
+                    // Viewfinder Container (Tap to launch live scanner)
+                    InkWell(
+                      onTap: openLiveScanner,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        height: 160,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF131E2E),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFF60A5FA), width: 1.5),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 4)),
+                          ],
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  isVerifying ? Icons.sync : Icons.qr_code_scanner,
+                                  size: 68,
+                                  color: isVerifying ? const Color(0xFF60A5FA) : Colors.white,
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'TAP TO SCAN QR WITH LIVE CAMERA',
+                                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Auto-detects Salesman settlement QR instantly',
+                                  style: TextStyle(color: Colors.white60, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            Positioned(
+                              top: 12,
+                              left: 12,
+                              child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF60A5FA), width: 3), left: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
+                            ),
+                            Positioned(
+                              top: 12,
+                              right: 12,
+                              child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFF60A5FA), width: 3), right: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
+                            ),
+                            Positioned(
+                              bottom: 12,
+                              left: 12,
+                              child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF60A5FA), width: 3), left: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
+                            ),
+                            Positioned(
+                              bottom: 12,
+                              right: 12,
+                              child: Container(width: 22, height: 22, decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFF60A5FA), width: 3), right: BorderSide(color: Color(0xFF60A5FA), width: 3)))),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
+
+                    // Primary Live Scanner Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        onPressed: openLiveScanner,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B365D),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 2,
+                        ),
+                        icon: const Icon(Icons.camera, size: 20),
+                        label: const Text(
+                          'OPEN LIVE CAMERA SCANNER',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
 
                     // Camera / Gallery Buttons
                     Row(

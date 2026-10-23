@@ -19,6 +19,7 @@ class SalesmanStockTab extends StatelessWidget {
   final VoidCallback onOpenReceiveStockScanner;
   final Function(String? name, String? base64, Uint8List? bytes) onProofPhotoChanged;
   final VoidCallback onAcceptStock;
+  final Future<void> Function()? onRefresh;
 
   const SalesmanStockTab({
     super.key,
@@ -36,11 +37,13 @@ class SalesmanStockTab extends StatelessWidget {
     required this.onOpenReceiveStockScanner,
     required this.onProofPhotoChanged,
     required this.onAcceptStock,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    final scrollContent = SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -433,28 +436,52 @@ class SalesmanStockTab extends StatelessWidget {
             ...stockHistory.map(
               (item) => _historyItem(
                 item['date']?.toString() ?? 'Today',
-                '${item['bottles'] ?? 10} Bottles',
-                '₹${item['amount'] ?? (unitPrice * 10).toInt()}',
+                '${(item['bottles'] as num?)?.toInt() ?? 0} Bottles',
+                '₹${item['amount'] ?? (((item['bottles'] as num?)?.toInt() ?? 0) * unitPrice).toInt()}',
                 item['status']?.toString() ?? 'SETTLED',
               ),
             )
-          else ...[
-            _historyItem(
-              '10 Aug, 09:30 AM',
-              '10 Bottles',
-              bottleUnitPrice != null ? '₹${(10 * bottleUnitPrice!).toInt()}' : 'Loading...',
-              'SETTLED',
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: ClientColors.border),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.inventory_2_outlined, color: ClientColors.textMuted, size: 36),
+                  SizedBox(height: 8),
+                  Text(
+                    'No stock transfers recorded yet',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: ClientColors.textMuted,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Accepted dispatches will appear here',
+                    style: TextStyle(fontSize: 11, color: ClientColors.textMuted),
+                  ),
+                ],
+              ),
             ),
-            _historyItem(
-              '09 Aug, 08:45 AM',
-              '12 Bottles',
-              bottleUnitPrice != null ? '₹${(12 * bottleUnitPrice!).toInt()}' : 'Loading...',
-              'SETTLED',
-            ),
-          ],
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: scrollContent,
+      );
+    }
+    return scrollContent;
   }
 
   Widget _verificationRow(String label, String value) {

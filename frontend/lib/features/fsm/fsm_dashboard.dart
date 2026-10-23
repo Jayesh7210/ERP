@@ -134,8 +134,11 @@ class _FsmDashboardState extends State<FsmDashboard> {
 
   bool _isSyncingOffline = false;
 
-  Future<void> _loadAllFsmData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadAllFsmData({bool silent = false}) async {
+    final hasExistingData = _dashboardData.isNotEmpty || _supervisedSalesmen.isNotEmpty;
+    if (!silent || !hasExistingData) {
+      setState(() => _isLoading = true);
+    }
     await Future.wait([
       _loadDashboardMetrics(),
       _loadTeamRoster(),
@@ -165,6 +168,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
             });
           }
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -275,6 +280,38 @@ class _FsmDashboardState extends State<FsmDashboard> {
     );
   }
 
+  DateTime? _lastRateLimitAlert;
+  void _handleRateLimit(http.Response res) {
+    if (res.statusCode == 429 && mounted) {
+      final now = DateTime.now();
+      if (_lastRateLimitAlert != null && now.difference(_lastRateLimitAlert!).inSeconds < 3) {
+        return;
+      }
+      _lastRateLimitAlert = now;
+      String msg = 'Field Manager rate limit reached. Please wait a moment.';
+      try {
+        final body = jsonDecode(res.body);
+        if (body is Map && body['error'] != null) {
+          msg = body['error'].toString();
+        }
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.speed, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(msg)),
+            ],
+          ),
+          backgroundColor: Colors.amber.shade900,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
   Future<void> _loadDashboardMetrics() async {
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/fsm/dashboard/$_fsmId'));
@@ -285,6 +322,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
             _dashboardData = Map<String, dynamic>.from(data);
           });
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -304,6 +343,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
             }
           });
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -323,6 +364,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
             }
           });
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -337,6 +380,8 @@ class _FsmDashboardState extends State<FsmDashboard> {
             _settlementHub = Map<String, dynamic>.from(data);
           });
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -391,11 +436,16 @@ class _FsmDashboardState extends State<FsmDashboard> {
 
   Future<void> _handleReferralAction(String reqId, String action) async {
     try {
-      await http.put(
+      final res = await http.put(
         Uri.parse('${AppState.apiBaseUrl}/fsm/referral-requests/$reqId'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'action': action}),
       );
+
+      if (res.statusCode == 429) {
+        _handleRateLimit(res);
+        return;
+      }
 
       final isApprove = action == 'approve';
       final msg = isApprove ? 'Candidate approved successfully!' : 'Candidate rejected.';
@@ -431,7 +481,11 @@ class _FsmDashboardState extends State<FsmDashboard> {
 
   Future<void> _handleSendReminder(String salesmanId, String name) async {
     try {
-      await http.post(Uri.parse('${AppState.apiBaseUrl}/fsm/settlement-remind/$salesmanId'));
+      final res = await http.post(Uri.parse('${AppState.apiBaseUrl}/fsm/settlement-remind/$salesmanId'));
+      if (res.statusCode == 429) {
+        _handleRateLimit(res);
+        return;
+      }
     } catch (_) {}
 
     if (mounted) {
@@ -469,7 +523,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                         ManagerDashboardTab(
                           dashboardData: _dashboardData,
                           fsmName: _fsmName,
-                          onRefresh: _loadAllFsmData,
+                          onRefresh: () => _loadAllFsmData(silent: true),
                           onViewAllTeam: () => _changeTab(1),
                           onScanWarehouseQR: _handleScanWarehouseQR,
                         ),
@@ -477,6 +531,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                           teamSummary: _teamSummary,
                           supervisedSalesmen: _supervisedSalesmen,
                           onAllocateStock: _openStockAllocationModal,
+                          onRefresh: () => _loadAllFsmData(silent: true),
                         ),
                         OperationsHomeTab(
                           availableDepotStock: _availableDepotStock,
@@ -484,6 +539,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                           onAllocateStock: _openStockAllocationModal,
                           onNavigateTab: _changeTab,
                           onScanWarehouseQR: _handleScanWarehouseQR,
+                          onRefresh: () => _loadAllFsmData(silent: true),
                         ),
                         ReferralRequestsTab(
                           requestsSummary: _requestsSummary,
@@ -491,6 +547,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                           selectedFilter: _selectedRequestFilter,
                           onFilterSelected: (filter) => setState(() => _selectedRequestFilter = filter),
                           onReferralAction: _handleReferralAction,
+                          onRefresh: () => _loadAllFsmData(silent: true),
                         ),
                         SettlementHubTab(
                           settlementHub: _settlementHub,
@@ -498,6 +555,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
                           onReviewSettlement: (st) => _openSalesmanSettlementScannerSheet(st),
                           onWarehouseReturnQR: _handleWarehouseReturnQR,
                           onSendReminder: _handleSendReminder,
+                          onRefresh: () => _loadAllFsmData(silent: true),
                         ),
                       ],
                     ),
@@ -565,7 +623,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
       actions: [
         IconButton(
           icon: const Icon(Icons.refresh, color: ClientColors.textMuted, size: 22),
-          onPressed: _loadAllFsmData,
+          onPressed: () => _loadAllFsmData(silent: true),
         ),
         Container(
           margin: const EdgeInsets.only(right: 14),

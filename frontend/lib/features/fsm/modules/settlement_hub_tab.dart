@@ -7,6 +7,7 @@ class SettlementHubTab extends StatelessWidget {
   final void Function(Map<String, dynamic> settlement) onReviewSettlement;
   final VoidCallback onWarehouseReturnQR;
   final void Function(String salesmanId, String name) onSendReminder;
+  final Future<void> Function()? onRefresh;
 
   const SettlementHubTab({
     super.key,
@@ -15,6 +16,7 @@ class SettlementHubTab extends StatelessWidget {
     required this.onReviewSettlement,
     required this.onWarehouseReturnQR,
     required this.onSendReminder,
+    this.onRefresh,
   });
 
   @override
@@ -26,7 +28,8 @@ class SettlementHubTab extends StatelessWidget {
     final int totalTeam = teamSettlements.length;
     final String settlementRatioText = totalTeam > 0 ? '$settledCount/$totalTeam Settled' : 'All Settled';
 
-    return SingleChildScrollView(
+    final content = SingleChildScrollView(
+      physics: onRefresh != null ? const AlwaysScrollableScrollPhysics() : null,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,6 +475,15 @@ class SettlementHubTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: content,
+      );
+    }
+    return content;
   }
 
   Widget _buildSettlementStat(String label, String value) {

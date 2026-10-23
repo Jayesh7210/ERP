@@ -54,6 +54,8 @@ class SalesmanSettlementQrModal {
                     onSettled();
                     return;
                   }
+                } else if (res.statusCode == 429) {
+                  debugPrint('Settlement poll rate limited (429). Waiting for next tick.');
                 }
               } catch (_) {}
               setDialogState(() => isChecking = false);

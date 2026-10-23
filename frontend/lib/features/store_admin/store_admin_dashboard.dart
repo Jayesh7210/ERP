@@ -227,15 +227,51 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
     );
   }
 
+  DateTime? _lastRateLimitAlert;
+  void _handleRateLimit(http.Response res) {
+    if (res.statusCode == 429 && mounted) {
+      final now = DateTime.now();
+      if (_lastRateLimitAlert != null && now.difference(_lastRateLimitAlert!).inSeconds < 3) {
+        return;
+      }
+      _lastRateLimitAlert = now;
+      String msg = 'Store Admin rate limit reached. Please wait a moment.';
+      try {
+        final body = jsonDecode(res.body);
+        if (body is Map && body['error'] != null) {
+          msg = body['error'].toString();
+        }
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.speed, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(msg)),
+            ],
+          ),
+          backgroundColor: Colors.amber.shade900,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
   Future<void> _loadProductsAndPrices() async {
     try {
       final resP = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
       if (resP.statusCode == 200) {
         _products = List<Map<String, dynamic>>.from(jsonDecode(resP.body));
+      } else if (resP.statusCode == 429) {
+        _handleRateLimit(resP);
       }
       final resPr = await http.get(Uri.parse('${AppState.apiBaseUrl}/products/prices'));
       if (resPr.statusCode == 200) {
         _prices = List<Map<String, dynamic>>.from(jsonDecode(resPr.body));
+      } else if (resPr.statusCode == 429) {
+        _handleRateLimit(resPr);
       }
     } catch (_) {
       _products = [];
@@ -257,6 +293,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           _activeWarehouseId = matched['id'].toString();
           _activeWarehouseName = matched['name']?.toString() ?? 'Warehouse Hub';
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -269,7 +307,16 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/$_warehouseId'));
       if (res.statusCode == 200) {
-        _warehouseStocks = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+        final decoded = jsonDecode(res.body);
+        if (decoded is List) {
+          _warehouseStocks = List<Map<String, dynamic>>.from(decoded);
+        } else if (decoded is Map && decoded['stock'] is List) {
+          _warehouseStocks = List<Map<String, dynamic>>.from(decoded['stock']);
+        } else {
+          _warehouseStocks = [];
+        }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _warehouseStocks = [];
@@ -288,6 +335,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
             _dispatchedUnits = (data['units_dispatched'] as num?)?.toInt() ?? 0;
             return;
           }
+        } else if (res.statusCode == 429) {
+          _handleRateLimit(res);
         }
       } catch (_) {}
     }
@@ -317,6 +366,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/alerts?warehouse_id=$_warehouseId'));
       if (res.statusCode == 200) {
         _alerts = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _alerts = [];
@@ -328,6 +379,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/intakes?warehouse_id=$_warehouseId'));
       if (res.statusCode == 200) {
         _intakes = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _intakes = [];
@@ -339,6 +392,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/transfers?from_id=$_warehouseId'));
       if (res.statusCode == 200) {
         _transfers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _transfers = [];
@@ -351,6 +406,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       if (res.statusCode == 200) {
         final all = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         _fsmUsers = all.where((u) => u['role'] == 'field_sales_manager').toList();
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _fsmUsers = [];
@@ -362,10 +419,14 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       final resR = await http.get(Uri.parse('${AppState.apiBaseUrl}/customers?customer_type=retail'));
       if (resR.statusCode == 200) {
         _retailCustomers = List<Map<String, dynamic>>.from(jsonDecode(resR.body));
+      } else if (resR.statusCode == 429) {
+        _handleRateLimit(resR);
       }
       final resD = await http.get(Uri.parse('${AppState.apiBaseUrl}/customers?customer_type=distributor'));
       if (resD.statusCode == 200) {
         _distributors = List<Map<String, dynamic>>.from(jsonDecode(resD.body));
+      } else if (resD.statusCode == 429) {
+        _handleRateLimit(resD);
       }
     } catch (_) {
       _retailCustomers = [];
@@ -378,6 +439,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/sales/report?warehouse_id=$_warehouseId'));
       if (res.statusCode == 200) {
         _sales = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       _sales = [];
@@ -460,9 +523,10 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   }
 
   Widget _buildBody() {
-    switch (_activeTab) {
-      case 0:
-        return InventoryIntakeTab(
+    return IndexedStack(
+      index: _activeTab.clamp(0, 4),
+      children: [
+        InventoryIntakeTab(
           warehouseId: _warehouseId,
           warehouseName: _warehouseName,
           warehouseStocks: _warehouseStocks,
@@ -474,18 +538,16 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           getRetailPriceForProduct: _getRetailPriceForProduct,
           getDistributorPriceForProduct: _getDistributorPriceForProduct,
           onRefresh: _loadAllStoreData,
-        );
-      case 1:
-        return FsmDistributionView(
+        ),
+        FsmDistributionView(
           warehouseId: _warehouseId,
           products: _products,
           fsmUsers: _fsmUsers,
           transfers: _transfers,
           getStockForProduct: _getStockForProduct,
           onTransferComplete: _loadAllStoreData,
-        );
-      case 2:
-        return DirectRetailSaleView(
+        ),
+        DirectRetailSaleView(
           warehouseId: _warehouseId,
           products: _products,
           customers: _retailCustomers,
@@ -493,9 +555,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           getStockForProduct: _getStockForProduct,
           getRetailPrice: _getRetailPriceForProduct,
           onSaleComplete: _loadAllStoreData,
-        );
-      case 3:
-        return DistributorSaleView(
+        ),
+        DistributorSaleView(
           warehouseId: _warehouseId,
           products: _products,
           distributors: _distributors,
@@ -503,9 +564,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           getStockForProduct: _getStockForProduct,
           getDistributorPrice: _getDistributorPriceForProduct,
           onSaleComplete: _loadAllStoreData,
-        );
-      case 4:
-        return StoreReportsView(
+        ),
+        StoreReportsView(
           warehouseId: _warehouseId,
           warehouseName: _warehouseName,
           intakes: _intakes,
@@ -514,21 +574,8 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           alerts: _alerts,
           getProductName: _getProductName,
           getProductUnit: _getProductUnit,
-        );
-      default:
-        return InventoryIntakeTab(
-          warehouseId: _warehouseId,
-          warehouseName: _warehouseName,
-          warehouseStocks: _warehouseStocks,
-          alerts: _alerts,
-          products: _products,
-          dispatchEarnings: _dispatchEarnings,
-          dispatchedUnits: _dispatchedUnits,
-          getStockForProduct: _getStockForProduct,
-          getRetailPriceForProduct: _getRetailPriceForProduct,
-          getDistributorPriceForProduct: _getDistributorPriceForProduct,
-          onRefresh: _loadAllStoreData,
-        );
-    }
+        ),
+      ],
+    );
   }
 }

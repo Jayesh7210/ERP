@@ -29,7 +29,7 @@ class _WorkforceReferralsModuleState extends State<WorkforceReferralsModule> {
 
   Future<void> _processReferralPayout(String id) async {
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('${AppState.apiBaseUrl}/referrals/$id/payout'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -37,6 +37,17 @@ class _WorkforceReferralsModuleState extends State<WorkforceReferralsModule> {
           'admin_name': AppState.currentUser?['name'],
         }),
       );
+      if (res.statusCode == 429 && mounted) {
+        String msg = 'Security Rate Limit: Too many payout operations. Please wait.';
+        try {
+          final b = jsonDecode(res.body);
+          if (b['error'] != null) msg = b['error'].toString();
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.amber.shade900),
+        );
+        return;
+      }
       widget.onRefresh();
       widget.onPayoutProcessed?.call();
       if (mounted) {

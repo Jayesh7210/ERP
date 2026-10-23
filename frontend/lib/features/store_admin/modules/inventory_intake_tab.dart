@@ -68,9 +68,9 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
         final picker = ImagePicker();
         final img = await picker.pickImage(
           source: source,
-          imageQuality: 85,
-          maxWidth: 1920,
-          maxHeight: 1920,
+          imageQuality: 75,
+          maxWidth: 1280,
+          maxHeight: 1280,
         );
         if (img != null) {
           final bytes = await img.readAsBytes();
@@ -211,11 +211,11 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Stock Intake Entry', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                        const Text('Stock Inward Request', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                         IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
                       ],
                     ),
-                    const Text('Add new supplier stock arrival to warehouse inventory with batch tracking.', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    const Text('Submit new supplier stock arrival for Super Admin verification & inventory credit.', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                     const SizedBox(height: 16),
 
                     DropdownButtonFormField<String>(
@@ -517,15 +517,18 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                                 base64Data = base64Encode(bytes);
                               }
 
+                              final currentUserId = AppState.currentUser?['id']?.toString() ?? 'unknown_user';
+                              final idempotencyKey = 'inward_${DateTime.now().millisecondsSinceEpoch}_${widget.warehouseId}_$selectedProduct';
+
                               try {
                                 final result = await OfflineSyncService.executeWithOfflineFallback(
                                   apiBaseUrl: AppState.apiBaseUrl,
-                                  endpoint: '/stock/intake',
+                                  endpoint: '/stock/inward',
                                   method: 'POST',
                                   role: 'store_admin',
-                                  type: 'stock_intake',
-                                  title: 'Stock Intake ($qty units)',
-                                  userId: AppState.currentUser?['id'],
+                                  type: 'stock_inward_request',
+                                  title: 'Stock Inward Request ($qty units)',
+                                  userId: currentUserId,
                                   payload: {
                                     'warehouse_id': widget.warehouseId,
                                     'product_id': selectedProduct,
@@ -535,7 +538,8 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                                     'date_received': dateController.text.trim(),
                                     'receipt_base64': base64Data,
                                     'receipt_filename': receiptFile?.name,
-                                    'received_by': AppState.currentUser?['id'],
+                                    'requested_by': currentUserId,
+                                    'idempotency_key': idempotencyKey,
                                   },
                                 );
 
@@ -545,28 +549,33 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                                   messenger.showSnackBar(
                                     SnackBar(
                                       content: Text(isOffline
-                                          ? '⚡ Stock intake saved offline! Queued to sync once connected.'
-                                          : 'Stock Intake Recorded Successfully!'),
+                                          ? '⚡ Stock inward request saved offline! Queued to sync once connected.'
+                                          : '✅ Stock Inward Request Submitted! Awaiting Super Admin Approval.'),
                                       backgroundColor: isOffline ? Colors.amber.shade800 : Colors.green,
+                                      duration: const Duration(seconds: 4),
                                     ),
                                   );
                                   widget.onRefresh();
                                   return;
+                                } else {
+                                  final err = result['error']?.toString() ?? 'Failed to submit inward request';
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Submission failed: $err'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
                                 }
-                              } catch (_) {}
-
-                              // Fallback Mock Update
-                              final prodStock = widget.warehouseStocks.firstWhere((s) => s['product_id'] == selectedProduct, orElse: () => {});
-                              if (prodStock.isNotEmpty) {
-                                prodStock['quantity'] = (prodStock['quantity'] as int) + qty;
-                              } else {
-                                widget.warehouseStocks.add({'owner_id': widget.warehouseId, 'product_id': selectedProduct, 'quantity': qty});
+                              } catch (e) {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Error: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              } finally {
+                                setModalState(() => isSubmitting = false);
                               }
-
-                              if (ctx.mounted) Navigator.pop(ctx);
-                              messenger.showSnackBar(const SnackBar(content: Text('Stock Intake Recorded (Offline Fallback)!')));
-                              if (mounted) setState(() {});
-                              widget.onRefresh();
                             },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
@@ -575,7 +584,7 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
                       ),
                       child: isSubmitting
                           ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('Confirm Stock Intake', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          : const Text('Submit Inward for Approval', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -687,7 +696,7 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
             const SizedBox(height: 16),
           ],
 
-          // Quick Action: Add Stock Intake
+          // Quick Action: Add Stock Inward Request
           ElevatedButton.icon(
             onPressed: _showStockIntakeModal,
             style: ElevatedButton.styleFrom(
@@ -697,7 +706,7 @@ class _InventoryIntakeTabState extends State<InventoryIntakeTab> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             icon: const Icon(Icons.add_shopping_cart),
-            label: const Text('Add New Stock Intake (Batch/Supplier)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            label: const Text('Request Stock Inward (Supplier Consignment)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           ),
           const SizedBox(height: 20),
 

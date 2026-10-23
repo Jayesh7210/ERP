@@ -5,12 +5,14 @@ class MyTeamTab extends StatelessWidget {
   final Map<String, dynamic> teamSummary;
   final List<Map<String, dynamic>> supervisedSalesmen;
   final VoidCallback onAllocateStock;
+  final Future<void> Function()? onRefresh;
 
   const MyTeamTab({
     super.key,
     required this.teamSummary,
     required this.supervisedSalesmen,
     required this.onAllocateStock,
+    this.onRefresh,
   });
 
   @override
@@ -18,7 +20,8 @@ class MyTeamTab extends StatelessWidget {
     final activeCount = teamSummary['active'] ?? 0;
     final offlineCount = teamSummary['offline'] ?? 0;
 
-    return SingleChildScrollView(
+    final content = SingleChildScrollView(
+      physics: onRefresh != null ? const AlwaysScrollableScrollPhysics() : null,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -226,5 +229,14 @@ class MyTeamTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: content,
+      );
+    }
+    return content;
   }
 }

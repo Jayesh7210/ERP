@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../../../core/constants/colors.dart';
 import '../../../core/services/offline_sales_service.dart';
 import '../../../core/state/app_state.dart';
@@ -12,6 +14,7 @@ class SalesmanRecordSaleModal {
     required List<Map<String, dynamic>> customers,
     required int totalDispatchedBottles,
     required int currentSettlementSoldBottles,
+    String? productId,
     required Function(int qty, double totalAmt, int newSettlementSold) onSaleSuccess,
   }) {
     bool isNewCustomer = false;
@@ -256,6 +259,7 @@ class SalesmanRecordSaleModal {
                         totalDispatchedBottles: totalDispatchedBottles,
                         currentSettlementSoldBottles: currentSettlementSoldBottles,
                         qty: qty,
+                        productId: productId,
                         totalAmt: totalAmt,
                         salePaymentMode: salePaymentMode,
                         isNewCustomer: isNewCustomer,
@@ -285,6 +289,7 @@ class SalesmanRecordSaleModal {
   static Future<void> _executeSale({
     required BuildContext context,
     required String salesmanId,
+    String? productId,
     required double unitPrice,
     required double? bottleUnitPrice,
     required int totalDispatchedBottles,
@@ -299,10 +304,26 @@ class SalesmanRecordSaleModal {
     required String custAddress,
     required Function(int qty, double totalAmt, int newSettlementSold) onSaleSuccess,
   }) async {
+    String resolvedProdId = (productId != null && productId.isNotEmpty && productId != 'p1')
+        ? productId
+        : '';
+
+    if (resolvedProdId.isEmpty) {
+      try {
+        final pRes = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
+        if (pRes.statusCode == 200) {
+          final pList = jsonDecode(pRes.body);
+          if (pList is List && pList.isNotEmpty) {
+            resolvedProdId = pList.first['id']?.toString() ?? '';
+          }
+        }
+      } catch (_) {}
+    }
+
     final result = await OfflineSalesService.recordSale(
       apiBaseUrl: AppState.apiBaseUrl,
       salesmanId: salesmanId,
-      productId: 'p1',
+      productId: resolvedProdId,
       quantity: qty,
       amount: totalAmt,
       paymentMethod: salePaymentMode,

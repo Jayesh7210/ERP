@@ -72,39 +72,87 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/users'));
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as List;
+        final dynamic decoded = jsonDecode(res.body);
+        List rawList = [];
+        if (decoded is List) {
+          rawList = decoded;
+        } else if (decoded is Map) {
+          if (decoded['users'] is List) {
+            rawList = decoded['users'];
+          } else if (decoded['data'] is List) {
+            rawList = decoded['data'];
+          }
+        }
         setState(() {
           _users.clear();
-          _users.addAll(data.cast<Map<String, dynamic>>());
+          for (final item in rawList) {
+            if (item is Map) {
+              _users.add(Map<String, dynamic>.from(item));
+            }
+          }
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading users: $e');
+    }
   }
 
   Future<void> _loadWarehouses() async {
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/warehouses'));
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as List;
+        final dynamic decoded = jsonDecode(res.body);
+        List rawList = [];
+        if (decoded is List) {
+          rawList = decoded;
+        } else if (decoded is Map) {
+          if (decoded['warehouses'] is List) {
+            rawList = decoded['warehouses'];
+          } else if (decoded['data'] is List) {
+            rawList = decoded['data'];
+          }
+        }
         setState(() {
           _warehouses.clear();
-          _warehouses.addAll(data.cast<Map<String, dynamic>>());
+          for (final item in rawList) {
+            if (item is Map) {
+              _warehouses.add(Map<String, dynamic>.from(item));
+            }
+          }
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading warehouses: $e');
+    }
   }
 
   Future<void> _loadRequests() async {
     try {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/workforce/requests'));
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as List;
+        final dynamic decoded = jsonDecode(res.body);
+        List rawList = [];
+        if (decoded is List) {
+          rawList = decoded;
+        } else if (decoded is Map) {
+          if (decoded['requests'] is List) {
+            rawList = decoded['requests'];
+          } else if (decoded['data'] is List) {
+            rawList = decoded['data'];
+          }
+        }
         setState(() {
           _requests.clear();
-          _requests.addAll(data.cast<Map<String, dynamic>>());
+          for (final item in rawList) {
+            if (item is Map) {
+              _requests.add(Map<String, dynamic>.from(item));
+            }
+          }
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error loading workforce requests: $e');
+    }
   }
 
   List<Map<String, dynamic>> get _filteredUsers {
@@ -182,6 +230,28 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
       return found['name']?.toString();
     }
     return null;
+  }
+
+  String _getRequesterName(dynamic requestedBy, [dynamic requestedByName]) {
+    if (requestedByName != null && requestedByName.toString().trim().isNotEmpty) {
+      return requestedByName.toString().trim();
+    }
+    if (requestedBy == null) return 'Supervisor';
+    if (requestedBy is Map) {
+      final name = requestedBy['name']?.toString();
+      if (name != null && name.trim().isNotEmpty) return name.trim();
+    }
+    final reqId = requestedBy.toString().trim();
+    if (reqId.isEmpty || reqId == 'null') return 'Supervisor';
+    final found = _users.firstWhere(
+      (u) => u['id']?.toString() == reqId,
+      orElse: () => {},
+    );
+    if (found.isNotEmpty && found['name'] != null) {
+      final roleStr = _roleDisplayName(found['role']?.toString() ?? '');
+      return '${found['name']} ($roleStr)';
+    }
+    return reqId.length > 10 ? 'Staff #${reqId.substring(0, 8)}' : reqId;
   }
 
   // ==========================================
@@ -737,6 +807,18 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                     );
                   }
                   _loadAllData();
+                } else if (res.statusCode == 429) {
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    String msg = 'Security Rate Limit: Too many sensitive operations. Please wait.';
+                    try {
+                      final b = jsonDecode(res.body);
+                      if (b['error'] != null) msg = b['error'].toString();
+                    } catch (_) {}
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(msg), backgroundColor: Colors.amber.shade900),
+                    );
+                  }
                 }
               } catch (_) {
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -1474,8 +1556,29 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
           ),
         );
         _loadAllData();
+      } else if (res.statusCode == 429) {
+        if (!mounted) return;
+        String msg = 'Security Rate Limit: Too many administrative actions. Please wait.';
+        try {
+          final b = jsonDecode(res.body);
+          if (b['error'] != null) msg = b['error'].toString();
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.amber.shade900),
+        );
+        return;
+      } else {
+        if (!mounted) return;
+        String errMsg = 'Failed to process request';
+        try {
+          final b = jsonDecode(res.body);
+          if (b['error'] != null) errMsg = b['error'].toString();
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('⚠️ $errMsg'), backgroundColor: Colors.red),
+        );
       }
-    } catch (_) {
+    } catch (e) {
       setState(() => _requests.removeWhere((r) => r['id'] == id));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1898,6 +2001,9 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
           final rawKycDoc = (req['kyc_doc'] ?? req['aadhaar_doc'] ?? '').toString();
           final kycDoc = (rawKycDoc == 'Aadhaar_Document.pdf') ? '' : rawKycDoc;
           final password = (req['password'] ?? '').toString();
+          final requesterDisplay = _getRequesterName(req['requested_by'], req['requested_by_name']);
+          final whName = _getWarehouseName(req);
+          final parentName = _getParentName(req);
 
           return Card(
             color: AppColors.cardBg,
@@ -1912,7 +2018,14 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(req['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Expanded(
+                        child: Text(
+                          (req['name'] ?? 'Unnamed Applicant').toString(),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
@@ -1927,7 +2040,17 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                   Text('Email: ${req['email'] ?? 'N/A'}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
                   if (req['phone'] != null && req['phone'].toString().isNotEmpty)
                     Text('Phone: ${req['phone']}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                  const SizedBox(height: 6),
+                  if (whName != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text('Assigned Depot: $whName', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    ),
+                  if (parentName != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text('Reports To: $parentName', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    ),
+                  const SizedBox(height: 8),
 
                   // Display Proposed Password & Aadhaar info for Super Admin Review
                   Container(
@@ -1944,25 +2067,43 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                           children: [
                             const Icon(Icons.vpn_key_rounded, size: 14, color: Colors.orange),
                             const SizedBox(width: 6),
-                            Text('Initial Password: ${password.isNotEmpty ? password : 'None set'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange)),
+                            Expanded(
+                              child: Text(
+                                'Initial Password: ${password.isNotEmpty ? password : 'None set (will setup at login)'}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.credit_card, size: 14, color: Colors.blue),
-                                const SizedBox(width: 6),
-                                Text('Aadhaar: ${aadhaarNo.isNotEmpty ? aadhaarNo : 'Not provided'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                              ],
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.credit_card, size: 14, color: Colors.blue),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Aadhaar: ${aadhaarNo.isNotEmpty ? aadhaarNo : (kycDoc.isNotEmpty ? 'Document Attached' : 'Not provided')}',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             if (kycDoc.isNotEmpty || aadhaarNo.isNotEmpty)
                               TextButton.icon(
-                                onPressed: () => _previewAadhaarDocument(req['name'] ?? 'Worker', aadhaarNo, kycDoc),
+                                onPressed: () => _previewAadhaarDocument(
+                                  req['name']?.toString() ?? 'Worker',
+                                  aadhaarNo,
+                                  kycDoc,
+                                ),
                                 icon: const Icon(Icons.open_in_new, size: 12),
-                                label: Text(kycDoc.isNotEmpty ? 'View Aadhaar' : 'View ID', style: const TextStyle(fontSize: 11)),
+                                label: Text(kycDoc.isNotEmpty ? 'View Document' : 'View ID', style: const TextStyle(fontSize: 11)),
                                 style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 24)),
                               ),
                           ],
@@ -1971,12 +2112,22 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                     ),
                   ),
 
-                  if (req['requested_by'] != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text('Requested by: ${req['requested_by']?['name'] ?? 'Supervisor'}',
-                          style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_pin_outlined, size: 15, color: AppColors.primary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Requested by: $requesterDisplay',
+                            style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
                   const Divider(height: 20),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,

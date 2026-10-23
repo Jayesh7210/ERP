@@ -18,6 +18,7 @@ class SalesmanReferTab extends StatelessWidget {
   final Function(String name, String? base64, Uint8List? bytes) onKycChanged;
   final Future<void> Function() onSubmitReferral;
   final VoidCallback onRefreshReferrals;
+  final Future<void> Function()? onRefresh;
 
   const SalesmanReferTab({
     super.key,
@@ -34,13 +35,14 @@ class SalesmanReferTab extends StatelessWidget {
     required this.onKycChanged,
     required this.onSubmitReferral,
     required this.onRefreshReferrals,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
     final soldTodayCount = (earningsData['sold_bottles_today'] as num?)?.toInt() ?? soldToday;
-    final minQuota = (earningsData['min_sales_quota'] as num?)?.toInt() ?? 5;
-    final isQuotaActive = earningsData['is_quota_condition_active'] != false;
+    final minQuota = (earningsData['min_sales_quota'] as num?)?.toInt() ?? 0;
+    final isQuotaActive = earningsData['is_quota_condition_active'] == true;
     final isQualified = earningsData['is_qualified'] == true || !isQuotaActive;
     final bottlesNeeded = (earningsData['bottles_needed_to_qualify'] as num?)?.toInt() ??
         (isQualified ? 0 : (minQuota - soldTodayCount).clamp(0, minQuota));
@@ -59,7 +61,8 @@ class SalesmanReferTab extends StatelessWidget {
     final double quotaProgress =
         minQuota > 0 ? (soldTodayCount / minQuota).clamp(0.0, 1.0) : 1.0;
 
-    return SingleChildScrollView(
+    final scrollContent = SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -754,6 +757,12 @@ class SalesmanReferTab extends StatelessWidget {
             }),
         ],
       ),
+    );
+
+    return RefreshIndicator(
+      color: ClientColors.primary,
+      onRefresh: onRefresh ?? () async => onRefreshReferrals(),
+      child: scrollContent,
     );
   }
 }

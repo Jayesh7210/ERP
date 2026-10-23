@@ -24,6 +24,11 @@ class _DashboardShellState extends State<DashboardShell> {
   final List<int> _superAdminTabHistory = [0];
   DateTime? _lastBackPressTime;
   List<Map<String, dynamic>> _notifications = [];
+  late final List<Widget> _superAdminPages = const [
+    SuperAdminDashboard(),
+    WorkforceRequestsPage(),
+    StockApprovalsPage(),
+  ];
 
   @override
   void initState() {
@@ -227,11 +232,7 @@ class _DashboardShellState extends State<DashboardShell> {
 
   List<Widget> _getPages() {
     if (AppState.isSuperAdmin) {
-      return [
-        const SuperAdminDashboard(),
-        const WorkforceRequestsPage(),
-        const StockApprovalsPage(),
-      ];
+      return _superAdminPages;
     } else if (AppState.isStoreAdmin) {
       return [
         const StoreAdminDashboard(),
@@ -325,7 +326,12 @@ class _DashboardShellState extends State<DashboardShell> {
           ),
         ],
       ),
-      body: pages[_currentIndex],
+      body: AppState.isSuperAdmin
+          ? IndexedStack(
+              index: _currentIndex,
+              children: _superAdminPages,
+            )
+          : pages[_currentIndex],
       bottomNavigationBar: navItems.length > 1
           ? BottomNavigationBar(
               currentIndex: _currentIndex,

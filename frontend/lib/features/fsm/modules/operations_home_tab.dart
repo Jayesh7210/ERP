@@ -7,6 +7,7 @@ class OperationsHomeTab extends StatelessWidget {
   final VoidCallback onAllocateStock;
   final void Function(int index) onNavigateTab;
   final VoidCallback onScanWarehouseQR;
+  final Future<void> Function()? onRefresh;
 
   const OperationsHomeTab({
     super.key,
@@ -15,11 +16,13 @@ class OperationsHomeTab extends StatelessWidget {
     required this.onAllocateStock,
     required this.onNavigateTab,
     required this.onScanWarehouseQR,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    final content = SingleChildScrollView(
+      physics: onRefresh != null ? const AlwaysScrollableScrollPhysics() : null,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -283,5 +286,14 @@ class OperationsHomeTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: content,
+      );
+    }
+    return content;
   }
 }

@@ -285,8 +285,13 @@ class _WarehousesModuleState extends State<WarehousesModule> {
                   });
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Failed to delete warehouse on server.'),
+                      SnackBar(
+                        content: Text(
+                          res.statusCode == 429
+                              ? 'Security Rate Limit: Too many sensitive warehouse operations. Please wait.'
+                              : 'Failed to delete warehouse on server.',
+                        ),
+                        backgroundColor: res.statusCode == 429 ? Colors.amber.shade900 : null,
                       ),
                     );
                   }

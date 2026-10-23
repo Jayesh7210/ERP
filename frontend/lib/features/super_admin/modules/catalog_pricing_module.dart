@@ -50,18 +50,15 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
     if (p['commission_slabs'] != null && p['commission_slabs'] is List && (p['commission_slabs'] as List).isNotEmpty) {
       return (p['commission_slabs'] as List).map((s) => Map<String, dynamic>.from(s as Map)).toList();
     }
-    return [
-      {'from_qty': 101, 'to_qty': 110, 'added_commission': 5.0, 'label': 'Tier 1 (+₹5)'},
-      {'from_qty': 111, 'to_qty': 130, 'added_commission': 10.0, 'label': 'Tier 2 (+₹10)'},
-    ];
+    return [];
   }
 
   static int getProductInitialQuota(Map<String, dynamic> p) {
     final pId = p['id']?.toString() ?? '';
     if (_customProductMeta.containsKey(pId) && _customProductMeta[pId]?['initial_stock_quota'] != null) {
-      return int.tryParse(_customProductMeta[pId]!['initial_stock_quota'].toString()) ?? 100;
+      return int.tryParse(_customProductMeta[pId]!['initial_stock_quota'].toString()) ?? 0;
     }
-    return int.tryParse(p['initial_stock_quota']?.toString() ?? '100') ?? 100;
+    return int.tryParse(p['initial_stock_quota']?.toString() ?? '0') ?? 0;
   }
 
   static double getRoleComm(Map<String, dynamic> p, String key) {
@@ -99,39 +96,39 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
       text: editProduct?['category'] ?? 'General',
     );
     final basePriceCtrl = TextEditingController(
-      text: editProduct?['base_price']?.toString() ?? '50',
+      text: editProduct?['base_price']?.toString() ?? '',
     );
     final alertCtrl = TextEditingController(
-      text: editProduct?['min_stock_alert']?.toString() ?? '20',
+      text: editProduct?['min_stock_alert']?.toString() ?? '',
     );
     final initialStockCtrl = TextEditingController(
       text: (editProduct != null
               ? getProductInitialQuota(editProduct)
-              : 100)
+              : 0)
           .toString(),
     );
     final storeAdminCommCtrl = TextEditingController(
       text: (editProduct != null
               ? getRoleComm(editProduct, 'store_admin_commission')
-              : 5.0)
+              : 0.0)
           .toString(),
     );
     final fsmCommCtrl = TextEditingController(
       text: (editProduct != null
               ? getRoleComm(editProduct, 'fsm_commission')
-              : 10.0)
+              : 0.0)
           .toString(),
     );
     final salesmanCommCtrl = TextEditingController(
       text: (editProduct != null
               ? getRoleComm(editProduct, 'salesman_commission')
-              : 50.0)
+              : 0.0)
           .toString(),
     );
     final referralCommCtrl = TextEditingController(
       text: (editProduct != null
               ? getRoleComm(editProduct, 'referral_commission')
-              : 10.0)
+              : 0.0)
           .toString(),
     );
     bool isAvailable = editProduct?['is_active'] != false;
@@ -139,10 +136,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
     // Slabs list
     List<Map<String, dynamic>> slabs = editProduct != null
         ? getProductSlabs(editProduct)
-        : [
-            {'from_qty': 101, 'to_qty': 110, 'added_commission': 5.0, 'label': 'Tier 1 (+₹5)'},
-            {'from_qty': 111, 'to_qty': 130, 'added_commission': 10.0, 'label': 'Tier 2 (+₹10)'},
-          ];
+        : [];
 
     showDialog(
       context: context,
@@ -472,9 +466,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                   'sku': skuCtrl.text.trim(),
                   'category': catCtrl.text.trim(),
                   'unit': unitCtrl.text.trim(),
-                  'base_price': double.tryParse(basePriceCtrl.text) ?? 50.0,
-                  'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
-                  'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                  'base_price': double.tryParse(basePriceCtrl.text) ?? 0.0,
+                  'min_stock_alert': int.tryParse(alertCtrl.text) ?? 10,
+                  'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 0,
                   'commission_slabs': slabs,
                   'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
                   'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
@@ -488,7 +482,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 try {
                   if (editProduct != null) {
                     _customProductMeta[editProduct['id'].toString()] = {
-                      'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                      'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 0,
                       'commission_slabs': slabs,
                       'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
                       'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
@@ -516,9 +510,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                       editProduct['sku'] = skuCtrl.text.trim();
                       editProduct['category'] = catCtrl.text.trim();
                       editProduct['unit'] = unitCtrl.text.trim();
-                      editProduct['base_price'] = double.tryParse(basePriceCtrl.text) ?? 50.0;
-                      editProduct['min_stock_alert'] = int.tryParse(alertCtrl.text) ?? 20;
-                      editProduct['initial_stock_quota'] = int.tryParse(initialStockCtrl.text) ?? 100;
+                      editProduct['base_price'] = double.tryParse(basePriceCtrl.text) ?? 0.0;
+                      editProduct['min_stock_alert'] = int.tryParse(alertCtrl.text) ?? 10;
+                      editProduct['initial_stock_quota'] = int.tryParse(initialStockCtrl.text) ?? 0;
                       editProduct['commission_slabs'] = slabs;
                       editProduct['store_admin_commission'] = double.tryParse(storeAdminCommCtrl.text) ?? 0.0;
                       editProduct['fsm_commission'] = double.tryParse(fsmCommCtrl.text) ?? 0.0;
@@ -532,9 +526,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                         'sku': skuCtrl.text.trim(),
                         'category': catCtrl.text.trim(),
                         'unit': unitCtrl.text.trim(),
-                        'base_price': double.tryParse(basePriceCtrl.text) ?? 50.0,
-                        'min_stock_alert': int.tryParse(alertCtrl.text) ?? 20,
-                        'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 100,
+                        'base_price': double.tryParse(basePriceCtrl.text) ?? 0.0,
+                        'min_stock_alert': int.tryParse(alertCtrl.text) ?? 10,
+                        'initial_stock_quota': int.tryParse(initialStockCtrl.text) ?? 0,
                         'commission_slabs': slabs,
                         'store_admin_commission': double.tryParse(storeAdminCommCtrl.text) ?? 0.0,
                         'fsm_commission': double.tryParse(fsmCommCtrl.text) ?? 0.0,
@@ -584,6 +578,16 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
             ),
             backgroundColor: nextStatus ? Colors.green.shade700 : Colors.red.shade700,
             duration: const Duration(seconds: 2),
+          ),
+        );
+      } else if (res.statusCode == 429 && mounted) {
+        setState(() {
+          p['is_active'] = !nextStatus;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Admin rate limit reached. Please wait before updating catalog status.'),
+            backgroundColor: Colors.amber.shade900,
           ),
         );
       }
@@ -650,6 +654,13 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
             SnackBar(
               content: Text('Product "${p['name']}" deleted successfully'),
               backgroundColor: Colors.red.shade700,
+            ),
+          );
+        } else if (res.statusCode == 429 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Security Rate Limit: Too many sensitive catalog operations. Please wait.'),
+              backgroundColor: Colors.amber.shade900,
             ),
           );
         }

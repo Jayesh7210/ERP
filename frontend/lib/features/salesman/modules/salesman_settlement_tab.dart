@@ -23,6 +23,7 @@ class SalesmanSettlementTab extends StatefulWidget {
   final VoidCallback onDeleteDamageImage;
   final Function({int? soldBottles, bool? hasDamaged, int? damagedCount}) onUpdateSettlementState;
   final VoidCallback onInitiateSettlement;
+  final Future<void> Function()? onRefresh;
 
   const SalesmanSettlementTab({
     super.key,
@@ -45,6 +46,7 @@ class SalesmanSettlementTab extends StatefulWidget {
     required this.onDeleteDamageImage,
     required this.onUpdateSettlementState,
     required this.onInitiateSettlement,
+    this.onRefresh,
   });
 
   @override
@@ -68,7 +70,8 @@ class _SalesmanSettlementTabState extends State<SalesmanSettlementTab> {
     final int totalCollected = cash + online;
     final int diff = soldAmt - totalCollected;
 
-    return SingleChildScrollView(
+    final scrollContent = SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1270,5 +1273,14 @@ class _SalesmanSettlementTabState extends State<SalesmanSettlementTab> {
         ],
       ),
     );
+
+    if (widget.onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: widget.onRefresh!,
+        child: scrollContent,
+      );
+    }
+    return scrollContent;
   }
 }

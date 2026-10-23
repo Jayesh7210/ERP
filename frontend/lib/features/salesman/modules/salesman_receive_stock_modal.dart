@@ -4,8 +4,26 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/colors.dart';
 import '../../../core/state/app_state.dart';
+import '../../../core/widgets/live_qr_scanner_modal.dart';
 
 class SalesmanReceiveStockModal {
+  static String getDeterministicPin(String trId) {
+    if (trId.isEmpty) return '000000';
+    final code = (trId.hashCode.abs() % 900000 + 100000).toString();
+    return code;
+  }
+
+  static bool isMatchingTransfer(Map<String, dynamic> t, String query) {
+    final q = query.trim();
+    if (q.isEmpty) return false;
+    final trId = t['id']?.toString() ?? '';
+    final pin = t['security_pin']?.toString() ?? getDeterministicPin(trId);
+    return q == trId ||
+        q == pin ||
+        (q.length >= 6 && trId.endsWith(q)) ||
+        (q.length >= 4 && trId.startsWith(q));
+  }
+
   static Future<void> show({
     required BuildContext context,
     required String salesmanId,
@@ -30,7 +48,7 @@ class SalesmanReceiveStockModal {
         if (res.statusCode == 200) {
           final all = List<Map<String, dynamic>>.from(jsonDecode(res.body));
           pendingTransfers =
-              all.where((t) => t['to_id'] == salesmanId || t['status'] == 'pending').toList();
+              all.where((t) => t['to_id'] == salesmanId && t['status'] == 'pending').toList();
         }
       } catch (_) {}
     }
@@ -56,7 +74,7 @@ class SalesmanReceiveStockModal {
             Future<void> confirmReceipt(Map<String, dynamic> tr) async {
               setSheetState(() => isProcessing = true);
               final trId = tr['id']?.toString() ?? '';
-              final qty = (tr['quantity'] as num?)?.toInt() ?? 10;
+              final qty = (tr['quantity'] as num?)?.toInt() ?? 0;
               final prodName = tr['product']?['name'] ?? tr['product_name'] ?? 'Water Bottle';
 
               try {
@@ -80,6 +98,17 @@ class SalesmanReceiveStockModal {
                     onReloadData();
                   }
                   return;
+                } else if (res.statusCode == 429) {
+                  if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: Colors.amber.shade900,
+                        content: const Text('⚠️ Transfer acceptance rate limit reached. Please wait a moment.'),
+                      ),
+                    );
+                  }
+                  return;
                 }
               } catch (_) {}
 
@@ -95,10 +124,81 @@ class SalesmanReceiveStockModal {
               }
             }
 
+            Future<void> openLiveScanner() async {
+              final raw = await LiveQrScannerModal.show(
+                context: context,
+                title: 'Scan Manager Dispatch QR',
+                subtitle: 'Point camera at Field Manager\'s transfer QR or enter PIN',
+              );
+              if (raw == null || raw.trim().isEmpty) return;
+
+              String extractedPin = raw.trim();
+              String? extractedId;
+
+              try {
+                final decoded = jsonDecode(raw);
+                if (decoded is Map) {
+                  extractedPin = decoded['security_pin']?.toString() ?? decoded['pin']?.toString() ?? extractedPin;
+                  extractedId = decoded['transfer_id']?.toString() ?? decoded['id']?.toString();
+                }
+              } catch (_) {}
+
+              // 1. Check local pending list
+              Map<String, dynamic>? match = pendingTransfers.cast<Map<String, dynamic>?>().firstWhere(
+                (t) =>
+                    (extractedId != null && t?['id']?.toString() == extractedId) ||
+                    (t != null && isMatchingTransfer(t, extractedPin)) ||
+                    (extractedId != null && t != null && isMatchingTransfer(t, extractedId)),
+                orElse: () => null,
+              );
+
+              // 2. If not found locally, fetch fresh from server by ID
+              if (match == null && extractedId != null) {
+                try {
+                  final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/transfers?id=$extractedId'));
+                  if (res.statusCode == 200) {
+                    final list = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+                    if (list.isNotEmpty) {
+                      match = list.first;
+                      if (!pendingTransfers.any((x) => x['id']?.toString() == match?['id']?.toString())) {
+                        pendingTransfers.insert(0, match);
+                      }
+                    }
+                  }
+                } catch (_) {}
+              }
+
+              if (match != null) {
+                final matchedTr = match;
+                final qty = matchedTr['quantity'];
+                final pName = matchedTr['product']?['name'] ?? matchedTr['product_name'] ?? 'Bottles';
+                setSheetState(() => selectedTransfer = matchedTr);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: ClientColors.success,
+                      content: Text('✓ Verified dispatch #$extractedPin: $qty units of $pName!'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              } else {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('No pending dispatch found matching scanned code: $extractedPin'),
+                      backgroundColor: Colors.orange.shade800,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              }
+            }
+
             Future<void> pickAndSimulateScan(ImageSource source) async {
               try {
                 final picker = ImagePicker();
-                final img = await picker.pickImage(source: source, imageQuality: 80);
+                final img = await picker.pickImage(source: source, imageQuality: 75, maxWidth: 1280, maxHeight: 1280);
                 if (img != null) {
                   setSheetState(() => isVerifying = true);
                   await Future.delayed(const Duration(milliseconds: 600));
@@ -194,45 +294,55 @@ class SalesmanReceiveStockModal {
                     ),
                     const SizedBox(height: 16),
 
-                    // Viewfinder Box
-                    Container(
-                      height: 180,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1712),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: ClientColors.primaryLight, width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.15),
-                            blurRadius: 10,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                isVerifying ? Icons.sync : Icons.qr_code_2,
-                                size: 76,
-                                color: isVerifying ? ClientColors.primaryLight : Colors.white70,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                isVerifying
-                                    ? 'Analyzing Manager QR Code...'
-                                    : 'Align Field Manager QR in Viewfinder',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
+                    // Viewfinder Box (Tap to launch live scanner)
+                    InkWell(
+                      onTap: openLiveScanner,
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        height: 180,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E1712),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: ClientColors.primaryLight, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  isVerifying ? Icons.sync : Icons.qr_code_scanner,
+                                  size: 72,
+                                  color: isVerifying ? ClientColors.primaryLight : Colors.white,
                                 ),
-                              ),
-                            ],
-                          ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'TAP TO SCAN QR WITH LIVE CAMERA',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Auto-detects FSM transfer QR instantly',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.7),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
                           Positioned(
                             top: 14,
                             left: 14,
@@ -292,7 +402,29 @@ class SalesmanReceiveStockModal {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
+                  ),
+                  const SizedBox(height: 14),
+
+                    // Primary Live Scanner Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: ElevatedButton.icon(
+                        onPressed: openLiveScanner,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: ClientColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 2,
+                        ),
+                        icon: const Icon(Icons.camera, size: 20),
+                        label: const Text(
+                          'OPEN LIVE CAMERA SCANNER',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
 
                     Row(
                       children: [
@@ -360,20 +492,27 @@ class SalesmanReceiveStockModal {
                           onPressed: () {
                             final pin = pinController.text.trim();
                             if (pin.isNotEmpty) {
-                              if (pendingTransfers.isNotEmpty) {
-                                setSheetState(() => selectedTransfer = pendingTransfers.first);
+                              final match = pendingTransfers.cast<Map<String, dynamic>?>().firstWhere(
+                                (t) => t != null && isMatchingTransfer(t, pin),
+                                orElse: () => null,
+                              );
+                              if (match != null) {
+                                setSheetState(() => selectedTransfer = match);
+                                ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: ClientColors.success,
+                                    content: Text('✓ Verified PIN: ${match['quantity']} bottles selected!'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
                               } else {
-                                setSheetState(() {
-                                  selectedTransfer = {
-                                    'id': 'tr_pin_${DateTime.now().millisecondsSinceEpoch}',
-                                    'from_name': AppState.currentUser?['parent_name'] ??
-                                        'Field Sales Manager',
-                                    'product': {'name': 'Water Bottle', 'sku': 'WB-20L'},
-                                    'quantity': 10,
-                                    'status': 'pending',
-                                    'created_at': DateTime.now().toIso8601String(),
-                                  };
-                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('No pending dispatch found matching PIN $pin'),
+                                    backgroundColor: Colors.orange.shade800,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
                               }
                             }
                           },
@@ -394,6 +533,89 @@ class SalesmanReceiveStockModal {
                       ],
                     ),
                     const SizedBox(height: 16),
+
+                    // Pending Dispatches Selector
+                    if (pendingTransfers.isNotEmpty) ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Field Dispatches Waiting for Receipt',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ClientColors.textDark),
+                          ),
+                          Text(
+                            '${pendingTransfers.length} pending',
+                            style: const TextStyle(fontSize: 11, color: ClientColors.textMuted),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ...pendingTransfers.map((tr) {
+                        final trId = tr['id']?.toString() ?? '';
+                        final shortId = trId.split('-').first;
+                        final qty = (tr['quantity'] as num?)?.toInt() ?? 0;
+                        final pName = tr['product']?['name'] ?? tr['product_name'] ?? 'Water Bottle';
+                        final pin = getDeterministicPin(trId);
+                        final isSelected = selectedTransfer != null && selectedTransfer!['id']?.toString() == trId;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFFF0FDF4) : Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF16A34A) : Colors.grey.shade300,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: ListTile(
+                            onTap: () => setSheetState(() => selectedTransfer = tr),
+                            dense: true,
+                            leading: CircleAvatar(
+                              backgroundColor: isSelected ? const Color(0xFF16A34A) : Colors.grey.shade200,
+                              radius: 18,
+                              child: Icon(
+                                isSelected ? Icons.check : Icons.local_shipping,
+                                color: isSelected ? Colors.white : ClientColors.primary,
+                                size: 18,
+                              ),
+                            ),
+                            title: Row(
+                              children: [
+                                Text(
+                                  '$qty $pName',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: isSelected ? const Color(0xFF15803D) : ClientColors.textDark,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade100,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'PIN: $pin',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            subtitle: Text(
+                              'Dispatch #$shortId • From ${tr['from_name'] ?? 'Field Manager'}',
+                              style: const TextStyle(fontSize: 11, color: ClientColors.textMuted),
+                            ),
+                            trailing: isSelected
+                                ? const Icon(Icons.radio_button_checked, color: Color(0xFF16A34A))
+                                : const Icon(Icons.radio_button_unchecked, color: Colors.grey),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 12),
+                    ],
 
                     if (selectedTransfer != null) ...[
                       Container(
@@ -492,7 +714,7 @@ class SalesmanReceiveStockModal {
                                   style: TextStyle(fontSize: 13, color: ClientColors.textMuted),
                                 ),
                                 Text(
-                                  '${selectedTransfer!['quantity'] ?? 10} Bottles',
+                                  '${(selectedTransfer!['quantity'] as num?)?.toInt() ?? 0} Bottles',
                                   style: const TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
@@ -511,7 +733,7 @@ class SalesmanReceiveStockModal {
                                 ),
                                 bottleUnitPrice != null
                                     ? Text(
-                                        '₹${(((selectedTransfer!['quantity'] as num?)?.toInt() ?? 10) * bottleUnitPrice).toInt()}',
+                                        '₹${(((selectedTransfer!['quantity'] as num?)?.toInt() ?? 0) * bottleUnitPrice).toInt()}',
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,

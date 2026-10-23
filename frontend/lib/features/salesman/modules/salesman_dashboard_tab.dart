@@ -16,6 +16,7 @@ class SalesmanDashboardTab extends StatelessWidget {
   final ValueChanged<bool> onDutyToggle;
   final ValueChanged<int> onNavigateTab;
   final VoidCallback onRecordSale;
+  final Future<void> Function()? onRefresh;
 
   const SalesmanDashboardTab({
     super.key,
@@ -33,15 +34,17 @@ class SalesmanDashboardTab extends StatelessWidget {
     required this.onDutyToggle,
     required this.onNavigateTab,
     required this.onRecordSale,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    final totalEarned = (earningsData['total_earned'] as num?)?.toDouble() ?? 245.0;
-    final commission = (earningsData['commission_earned'] as num?)?.toDouble() ?? 210.0;
-    final referralEarned = (earningsData['referral_earned'] as num?)?.toDouble() ?? 35.0;
+    final totalEarned = (earningsData['total_earned'] as num?)?.toDouble() ?? 0.0;
+    final commission = (earningsData['commission_earned'] as num?)?.toDouble() ?? 0.0;
+    final referralEarned = (earningsData['referral_earned'] as num?)?.toDouble() ?? 0.0;
 
-    return SingleChildScrollView(
+    final scrollContent = SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,43 +217,68 @@ class SalesmanDashboardTab extends StatelessWidget {
           const Text('Current Inventory', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ClientColors.textDark)),
           const SizedBox(height: 10),
 
-          // Settlement Pending Alert
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: ClientColors.alertBg,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: ClientColors.alertBorder),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.warning_amber_rounded, color: ClientColors.alertText, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Settlement Pending', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: ClientColors.alertText)),
-                      Text('${currentStock > 0 ? currentStock : 3} bottles remaining to be settled.', style: const TextStyle(fontSize: 11, color: ClientColors.textMuted)),
-                      const SizedBox(height: 2),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          bottleUnitPrice != null
-                              ? Text('Amount: ₹${((currentStock > 0 ? currentStock : 3) * bottleUnitPrice!).toInt()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.textDark))
-                              : const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
-                          InkWell(
-                            onTap: () => onNavigateTab(4),
-                            child: const Text('Settle Now ->', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.alertText)),
-                          ),
-                        ],
-                      ),
-                    ],
+          // Settlement Status Alert
+          if (currentStock > 0)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: ClientColors.alertBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: ClientColors.alertBorder),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: ClientColors.alertText, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Settlement Pending', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: ClientColors.alertText)),
+                        Text('$currentStock bottles remaining to be settled.', style: const TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                        const SizedBox(height: 2),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            bottleUnitPrice != null
+                                ? Text('Amount: ₹${(currentStock * bottleUnitPrice!).toInt()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.textDark))
+                                : const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary)),
+                            InkWell(
+                              onTap: () => onNavigateTab(4),
+                              child: const Text('Settle Now ->', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ClientColors.alertText)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_outline, color: Colors.green, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Settlements Up to Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green)),
+                        Text('All assigned bottles have been accounted for.', style: TextStyle(fontSize: 11, color: ClientColors.textMuted)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 12),
 
           // Total Value Card
@@ -361,5 +389,14 @@ class SalesmanDashboardTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: scrollContent,
+      );
+    }
+    return scrollContent;
   }
 }

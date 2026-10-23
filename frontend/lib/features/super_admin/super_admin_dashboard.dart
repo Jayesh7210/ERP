@@ -53,8 +53,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     _loadAllData();
   }
 
-  Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadAllData({bool silent = false}) async {
+    if (!silent || (_summary.isEmpty && _sales.isEmpty)) {
+      setState(() => _isLoading = true);
+    }
     await Future.wait([
       _loadSummary(),
       _loadSales(),
@@ -205,6 +207,38 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     );
   }
 
+  DateTime? _lastRateLimitAlert;
+  void _handleRateLimit(http.Response res) {
+    if (res.statusCode == 429 && mounted) {
+      final now = DateTime.now();
+      if (_lastRateLimitAlert != null && now.difference(_lastRateLimitAlert!).inSeconds < 3) {
+        return;
+      }
+      _lastRateLimitAlert = now;
+      String msg = 'Super Admin rate limit reached. Please wait a moment.';
+      try {
+        final body = jsonDecode(res.body);
+        if (body is Map && body['error'] != null) {
+          msg = body['error'].toString();
+        }
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.speed, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(msg)),
+            ],
+          ),
+          backgroundColor: Colors.amber.shade900,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
   Future<void> _loadSummary() async {
     try {
       final res = await http.get(
@@ -212,6 +246,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
       );
       if (res.statusCode == 200) {
         setState(() => _summary = jsonDecode(res.body));
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(
@@ -243,6 +279,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _sales.clear();
           _sales.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -262,6 +300,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _settlements.clear();
           _settlements.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -393,18 +433,15 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _workforce.clear();
           _workforce.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
         _workforce.clear();
-        _workforce.add({
-          'id': 'u1',
-          'name': 'Super Admin',
-          'email': 'admin@erp.com',
-          'phone': '',
-          'role': 'super_admin',
-          'status': 'approved',
-        });
+        if (AppState.currentUser != null) {
+          _workforce.add(Map<String, dynamic>.from(AppState.currentUser!));
+        }
       });
     }
   }
@@ -420,6 +457,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _permissions.clear();
           _permissions.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -489,6 +528,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _products.clear();
           _products.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -508,6 +549,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _prices.clear();
           _prices.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -527,6 +570,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _warehouses.clear();
           _warehouses.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -546,6 +591,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _globalStocks.clear();
           _globalStocks.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -565,6 +612,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _transfers.clear();
           _transfers.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -584,6 +633,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _alerts.clear();
           _alerts.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -613,6 +664,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _referrals.clear();
           _referrals.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -632,6 +685,8 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           _auditLogs.clear();
           _auditLogs.addAll(data.cast<Map<String, dynamic>>());
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -647,7 +702,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
   ) async {
     final nextAllowed = !currentAllowed;
     try {
-      await http.put(
+      final res = await http.put(
         Uri.parse('${AppState.apiBaseUrl}/permissions'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -658,6 +713,10 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           'admin_name': AppState.currentUser?['name'],
         }),
       );
+      if (res.statusCode == 429) {
+        _handleRateLimit(res);
+        return;
+      }
       _loadPermissions();
       _loadAuditLogs();
     } catch (_) {
@@ -723,9 +782,13 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       .abs(),
             );
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+    return RefreshIndicator(
+      onRefresh: () => _loadAllData(silent: true),
+      color: AppColors.primary,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Low-stock warning banner if applicable
@@ -986,8 +1049,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _dailyPulseCard({
     required IconData icon,

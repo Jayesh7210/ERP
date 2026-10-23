@@ -266,7 +266,9 @@ class OfflineSalesService {
       try {
         final payload = {
           'salesman_id': sale['salesman_id'],
-          'product_id': sale['product_id'] ?? 'p1',
+          'product_id': (sale['product_id'] != null && sale['product_id'].toString().isNotEmpty && sale['product_id'] != 'p1')
+              ? sale['product_id']
+              : '674c4d9a-ea5c-44b5-bf40-5827d14b0b1b',
           'quantity': sale['quantity'],
           'amount': sale['amount'],
           'payment_method': sale['payment_method'],

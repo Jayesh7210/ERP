@@ -7,6 +7,7 @@ class SalesmanHomeTab extends StatelessWidget {
   final double? bottleUnitPrice;
   final ValueChanged<int> onNavigateTab;
   final VoidCallback onRecordSale;
+  final Future<void> Function()? onRefresh;
 
   const SalesmanHomeTab({
     super.key,
@@ -15,11 +16,13 @@ class SalesmanHomeTab extends StatelessWidget {
     required this.bottleUnitPrice,
     required this.onNavigateTab,
     required this.onRecordSale,
+    this.onRefresh,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    final scrollContent = SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,6 +237,15 @@ class SalesmanHomeTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: scrollContent,
+      );
+    }
+    return scrollContent;
   }
 
   Widget _homeActionCard({

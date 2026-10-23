@@ -292,14 +292,26 @@ class _FsmDistributionViewState extends State<FsmDistributionView> {
         },
       );
 
+      if (result['success'] != true) {
+        if (!mounted) return;
+        setState(() => _isSubmitting = false);
+        final err = result['error']?.toString() ?? 'Failed to initiate stock transfer.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade800,
+            content: Text('⚠️ $err'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
       String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
-      if (result['success'] == true) {
-        final body = result['data'];
-        if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
-          transferId = body['transfer']['id'].toString();
-        } else if (result['action_id'] != null) {
-          transferId = result['action_id'].toString();
-        }
+      final body = result['data'];
+      if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
+        transferId = body['transfer']['id'].toString();
+      } else if (result['action_id'] != null) {
+        transferId = result['action_id'].toString();
       }
 
       final selectedFsm = widget.fsmUsers.firstWhere(

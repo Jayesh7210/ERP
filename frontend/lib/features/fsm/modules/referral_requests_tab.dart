@@ -7,6 +7,7 @@ class ReferralRequestsTab extends StatelessWidget {
   final String selectedFilter;
   final ValueChanged<String> onFilterSelected;
   final void Function(String reqId, String action) onReferralAction;
+  final Future<void> Function()? onRefresh;
 
   const ReferralRequestsTab({
     super.key,
@@ -15,6 +16,7 @@ class ReferralRequestsTab extends StatelessWidget {
     required this.selectedFilter,
     required this.onFilterSelected,
     required this.onReferralAction,
+    this.onRefresh,
   });
 
   @override
@@ -22,7 +24,8 @@ class ReferralRequestsTab extends StatelessWidget {
     final pendingCount = (requestsSummary['pending'] as num?)?.toInt() ?? 0;
     final reviewCount = (requestsSummary['in_review'] as num?)?.toInt() ?? 0;
 
-    return SingleChildScrollView(
+    final content = SingleChildScrollView(
+      physics: onRefresh != null ? const AlwaysScrollableScrollPhysics() : null,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,5 +296,14 @@ class ReferralRequestsTab extends StatelessWidget {
         ],
       ),
     );
+
+    if (onRefresh != null) {
+      return RefreshIndicator(
+        color: ClientColors.primary,
+        onRefresh: onRefresh!,
+        child: content,
+      );
+    }
+    return content;
   }
 }

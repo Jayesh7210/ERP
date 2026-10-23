@@ -150,6 +150,20 @@ class _StockApprovalsPageState extends State<StockApprovalsPage> with SingleTick
           ),
         );
         _loadAllData();
+      } else if (res.statusCode == 429) {
+        if (!mounted) return;
+        String msg = 'Security Rate Limit: Too many inward approval requests.';
+        try {
+          final b = jsonDecode(res.body);
+          if (b['error'] != null) msg = b['error'].toString();
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: Colors.amber.shade900,
+          ),
+        );
+        return;
       }
     } catch (_) {
       setState(() => _inwards.removeWhere((i) => i['id'] == id));
@@ -170,10 +184,15 @@ class _StockApprovalsPageState extends State<StockApprovalsPage> with SingleTick
     }
 
     setState(() => _isSubmitting = true);
+    final currentUserId = AppState.currentUser?['id']?.toString() ?? 'super_admin';
+    final idempotencyKey = 'super_intake_${DateTime.now().millisecondsSinceEpoch}_${_selectedWarehouseId}_$_selectedProductId';
     try {
       final res = await http.post(
         Uri.parse('${AppState.apiBaseUrl}/stock/intake'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
         body: jsonEncode({
           'warehouse_id': _selectedWarehouseId,
           'product_id': _selectedProductId,
@@ -181,7 +200,8 @@ class _StockApprovalsPageState extends State<StockApprovalsPage> with SingleTick
           'batch_number': _batchCtrl.text.trim(),
           'supplier': _supplierCtrl.text.trim(),
           'date_received': DateTime.now().toIso8601String().split('T')[0],
-          'received_by': AppState.currentUser?['id'],
+          'received_by': currentUserId,
+          'idempotency_key': idempotencyKey,
         }),
       );
 

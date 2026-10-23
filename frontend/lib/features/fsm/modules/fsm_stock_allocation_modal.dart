@@ -248,8 +248,9 @@ class FsmStockAllocationModal {
                                       InkWell(
                                         onTap: () {
                                           if (curQty > 0) {
+                                            final int step = curQty < 10 ? curQty : 10;
                                             setSheetState(() {
-                                              draftAllocations[smId] = (curQty - 10).clamp(0, 9999);
+                                              draftAllocations[smId] = (curQty - step).clamp(0, 99999);
                                             });
                                           }
                                         },
@@ -265,23 +266,68 @@ class FsmStockAllocationModal {
                                           child: const Icon(Icons.remove, size: 16, color: ClientColors.textDark),
                                         ),
                                       ),
-                                      Container(
-                                        width: 52,
-                                        alignment: Alignment.center,
-                                        child: Text(
-                                          '$curQty',
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.bold,
-                                            color: curQty > 0 ? ClientColors.primary : ClientColors.textDark,
+                                      InkWell(
+                                        onTap: () async {
+                                          final ctrl = TextEditingController(text: '$curQty');
+                                          final entered = await showDialog<int>(
+                                            context: context,
+                                            builder: (dCtx) => AlertDialog(
+                                              backgroundColor: Colors.white,
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                              title: Text('Allocate to $smName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                              content: TextField(
+                                                controller: ctrl,
+                                                keyboardType: TextInputType.number,
+                                                autofocus: true,
+                                                decoration: InputDecoration(
+                                                  labelText: 'Quantity (Bottles)',
+                                                  hintText: 'Max ${curQty + remainingStock}',
+                                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                                ),
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(dCtx),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                ElevatedButton(
+                                                  onPressed: () {
+                                                    final val = int.tryParse(ctrl.text.trim()) ?? curQty;
+                                                    Navigator.pop(dCtx, val);
+                                                  },
+                                                  style: ElevatedButton.styleFrom(backgroundColor: ClientColors.primary, foregroundColor: Colors.white),
+                                                  child: const Text('Set'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          if (entered != null) {
+                                            final maxAllowed = curQty + remainingStock;
+                                            final clamped = entered.clamp(0, maxAllowed);
+                                            setSheetState(() {
+                                              draftAllocations[smId] = clamped;
+                                            });
+                                          }
+                                        },
+                                        child: Container(
+                                          width: 52,
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            '$curQty',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.bold,
+                                              color: curQty > 0 ? ClientColors.primary : ClientColors.textDark,
+                                            ),
                                           ),
                                         ),
                                       ),
                                       InkWell(
                                         onTap: () {
-                                          if (remainingStock >= 10) {
+                                          if (remainingStock > 0) {
+                                            final int step = remainingStock < 10 ? remainingStock : 10;
                                             setSheetState(() {
-                                              draftAllocations[smId] = curQty + 10;
+                                              draftAllocations[smId] = curQty + step;
                                             });
                                           } else {
                                             rootMessenger.showSnackBar(
@@ -477,13 +523,24 @@ class FsmStockAllocationModal {
         },
       );
 
-      if (result['success'] == true) {
-        final body = result['data'];
-        if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
-          transferId = body['transfer']['id'].toString();
-        } else if (result['action_id'] != null) {
-          transferId = result['action_id'].toString();
-        }
+      if (result['success'] != true) {
+        if (!context.mounted) return;
+        final err = result['error']?.toString() ?? 'Failed to initiate allocation.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade800,
+            content: Text('⚠️ $err'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      final body = result['data'];
+      if (body != null && body['transfer'] != null && body['transfer']['id'] != null) {
+        transferId = body['transfer']['id'].toString();
+      } else if (result['action_id'] != null) {
+        transferId = result['action_id'].toString();
       }
     } catch (_) {}
 

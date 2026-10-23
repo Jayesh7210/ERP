@@ -31,7 +31,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   int _activeTab = 2; // Default to Home as shown in client's center highlight
   final List<int> _tabHistory = [2];
   DateTime? _lastBackPressTime;
-  bool _isLoading = false;
+  bool _isLoading = true;
+  bool _hasInitialLoaded = false;
 
   void _changeTab(int index) {
     if (_activeTab == index) return;
@@ -81,8 +82,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
 
   // Agent Status
   bool _isOnDuty = true;
-  String get _salesmanId => AppState.currentUser?['id'] ?? 'u4';
+  String get _salesmanId => AppState.currentUser?['id']?.toString() ?? '';
   String get _salesmanName => AppState.currentUser?['name'] ?? 'Salesman';
+  String? _productId;
 
   // Earnings Data
   Map<String, dynamic> _earningsData = {
@@ -97,8 +99,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
 
   // Settlement Tab State
   int _settlementSoldBottles = 0;
-  int _totalDispatchedBottles = 10;
-  int _currentStock = 10;
+  int _totalDispatchedBottles = 0;
+  int _currentStock = 0;
   int _soldToday = 0;
   double? _bottleUnitPrice;
   double get _unitPrice => _bottleUnitPrice ?? 0.0;
@@ -160,21 +162,88 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
 
   bool _isSyncingOfflineSales = false;
 
-  Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
+  DateTime? _lastRateLimitAlert;
+  void _handleRateLimit(http.Response res) {
+    if (res.statusCode == 429 && mounted) {
+      final now = DateTime.now();
+      if (_lastRateLimitAlert != null && now.difference(_lastRateLimitAlert!).inSeconds < 3) {
+        return;
+      }
+      _lastRateLimitAlert = now;
+      String msg = 'Salesman rate limit reached. Please wait a moment.';
+      try {
+        final body = jsonDecode(res.body);
+        if (body is Map && body['error'] != null) {
+          msg = body['error'].toString();
+        }
+      } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.speed, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text(msg)),
+            ],
+          ),
+          backgroundColor: Colors.amber.shade900,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadAllData({bool silent = false}) async {
+    if (!_hasInitialLoaded && !silent) {
+      setState(() => _isLoading = true);
+    }
     await Future.wait([
       _loadEarnings(),
       _loadSettlements(),
       _loadReferrals(),
       _loadCustomers(),
       _loadStockTransfers(),
+      _loadCurrentStock(),
       _loadProductPricing(),
       _restoreOfflineSalesState(),
     ]);
-    if (mounted) setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _hasInitialLoaded = true;
+      });
+    }
 
     // Auto-sync pending offline sales in background
     _syncPendingSales(silent: true);
+  }
+
+  Future<void> _loadCurrentStock() async {
+    try {
+      final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/$_salesmanId'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final stockList = data['stock'];
+        if (stockList is List && stockList.isNotEmpty) {
+          int totalStock = 0;
+          for (var item in stockList) {
+            totalStock += (item['available_quantity'] as num?)?.toInt() ??
+                (item['quantity'] as num?)?.toInt() ??
+                0;
+          }
+          if (mounted) {
+            setState(() {
+              _currentStock = totalStock;
+              if (_totalDispatchedBottles == 0) {
+                _totalDispatchedBottles = totalStock;
+              }
+            });
+          }
+        }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadProductPricing() async {
@@ -184,16 +253,20 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         final list = jsonDecode(res.body);
         if (list is List && list.isNotEmpty) {
           final first = list.first;
+          final prodId = first['id']?.toString();
           final basePrice = (first['base_price'] as num?)?.toDouble();
-          if (basePrice != null && basePrice > 0) {
-            if (mounted) {
-              setState(() {
+          if (mounted) {
+            setState(() {
+              if (prodId != null && prodId.isNotEmpty) _productId = prodId;
+              if (basePrice != null && basePrice > 0) {
                 _bottleUnitPrice = basePrice;
                 _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
-              });
-            }
+              }
+            });
           }
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -270,6 +343,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           _isOnDuty = data['is_on_duty'] ?? true;
           _soldToday = (data['sold_bottles_today'] as num?)?.toInt() ?? 0;
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -301,6 +376,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         setState(() {
           _settlementHistory = List<Map<String, dynamic>>.from(data['history'] ?? []);
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -317,6 +394,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         setState(() {
           _referralsList = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -333,6 +412,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         setState(() {
           _customers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         });
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {
       setState(() {
@@ -353,22 +434,28 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
               0, (sum, t) => sum + ((t['quantity'] as num?)?.toInt() ?? 0));
           if (mounted) {
             setState(() {
-              _totalDispatchedBottles = total > 0 ? total : _totalDispatchedBottles;
-              _currentStock = total > 0 ? total : _currentStock;
+              if (total > 0) {
+                _totalDispatchedBottles = total;
+                if (_currentStock == 0) {
+                  _currentStock = total;
+                }
+              }
               _isStockAccepted = true;
               _stockHistory = completed
                   .map((t) => {
                         'date': t['created_at'] != null
                             ? t['created_at'].toString().split('T').first
                             : 'Today',
-                        'bottles': t['quantity'] ?? 10,
-                        'amount': (((t['quantity'] as num?)?.toInt() ?? 10) * _unitPrice).toInt(),
+                        'bottles': (t['quantity'] as num?)?.toInt() ?? 0,
+                        'amount': (((t['quantity'] as num?)?.toInt() ?? 0) * _unitPrice).toInt(),
                         'status': 'SETTLED',
                       })
                   .toList();
             });
           }
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
   }
@@ -376,11 +463,16 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   Future<void> _toggleDutyStatus(bool val) async {
     setState(() => _isOnDuty = val);
     try {
-      await http.put(
+      final res = await http.put(
         Uri.parse('${AppState.apiBaseUrl}/users/$_salesmanId/duty'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'is_on_duty': val}),
       );
+      if (res.statusCode == 429) {
+        setState(() => _isOnDuty = !val);
+        _handleRateLimit(res);
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -429,6 +521,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             ),
           );
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
+        return;
       }
     } catch (_) {
       setState(() {
@@ -483,6 +578,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     SalesmanRecordSaleModal.show(
       context: context,
       salesmanId: _salesmanId,
+      productId: _productId,
       unitPrice: _unitPrice,
       bottleUnitPrice: _bottleUnitPrice,
       customers: _customers,
@@ -493,7 +589,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           _settlementSoldBottles = newSettlementSold;
           _soldBottlesInputCtrl.text = '$_settlementSoldBottles';
           _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
+          _currentStock = (_currentStock - qty).clamp(0, 999999);
+          _soldToday += qty;
         });
+        _loadEarnings();
+        _loadCurrentStock();
       },
     );
   }
@@ -517,7 +617,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           });
         });
       },
-      onReloadData: _loadAllData,
+      onReloadData: () => _loadAllData(silent: true),
     );
   }
 
@@ -532,7 +632,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
 
     String settlementId = 'stl_${DateTime.now().millisecondsSinceEpoch}';
     final securityPin = (settlementId.hashCode.abs() % 900000 + 100000).toString();
-    final fsmId = AppState.currentUser?['parent_id'] ?? 'c3456789-de23-45ff-67ff-8901abcdef23';
+    final fsmId = AppState.currentUser?['parent_id']?.toString() ?? '';
     final fsmName = AppState.currentUser?['parent_name'] ?? 'Field Sales Manager';
 
     try {
@@ -563,6 +663,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         if (body['id'] != null) {
           settlementId = body['id'].toString();
         }
+      } else if (res.statusCode == 429) {
+        _handleRateLimit(res);
       }
     } catch (_) {}
 
@@ -629,9 +731,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             'status': 'SETTLED',
           });
         });
-        _loadAllData();
+        _loadAllData(silent: true);
       },
-      onClose: _loadAllData,
+      onClose: () => _loadAllData(silent: true),
     );
   }
 
@@ -652,7 +754,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             children: [
               _buildTopAppBar(tabTitles[_activeTab]),
               Expanded(
-                child: _isLoading
+                child: (_isLoading && !_hasInitialLoaded)
                     ? const Center(child: CircularProgressIndicator(color: ClientColors.primary))
                     : IndexedStack(
                         index: _activeTab,
@@ -672,6 +774,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             onDutyToggle: _toggleDutyStatus,
                             onNavigateTab: _changeTab,
                             onRecordSale: _openRecordSaleModal,
+                            onRefresh: () => _loadAllData(silent: true),
                           ),
                           SalesmanStockTab(
                             currentStock: _currentStock,
@@ -713,6 +816,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                                 ),
                               );
                             },
+                            onRefresh: () => _loadAllData(silent: true),
                           ),
                           SalesmanHomeTab(
                             offlineSyncBanner: _buildOfflineSyncBanner(),
@@ -720,6 +824,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             bottleUnitPrice: _bottleUnitPrice,
                             onNavigateTab: _changeTab,
                             onRecordSale: _openRecordSaleModal,
+                            onRefresh: () => _loadAllData(silent: true),
                           ),
                           SalesmanReferTab(
                             salesmanName: _salesmanName,
@@ -746,6 +851,10 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             onRefreshReferrals: () {
                               _loadReferrals();
                               _loadEarnings();
+                            },
+                            onRefresh: () async {
+                              await _loadReferrals();
+                              await _loadEarnings();
                             },
                           ),
                           SalesmanSettlementTab(
@@ -780,6 +889,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                               });
                             },
                             onInitiateSettlement: _initiateSettlementAndShowQR,
+                            onRefresh: () => _loadAllData(silent: true),
                           ),
                         ],
                       ),
@@ -839,6 +949,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           ),
           Row(
             children: [
+              IconButton(
+                icon: const Icon(Icons.refresh, color: ClientColors.textMuted, size: 22),
+                tooltip: 'Refresh data',
+                onPressed: () => _loadAllData(silent: true),
+              ),
               Stack(
                 children: [
                   IconButton(
@@ -857,13 +972,13 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                   ),
                 ],
               ),
-              const SizedBox(width: 2),
-              const CircleAvatar(
+              const SizedBox(width: 4),
+              CircleAvatar(
                 radius: 17,
                 backgroundColor: ClientColors.primary,
                 child: Text(
-                  'R',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  _salesmanName.isNotEmpty ? _salesmanName[0].toUpperCase() : 'S',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ],

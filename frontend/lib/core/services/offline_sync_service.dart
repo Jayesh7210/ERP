@@ -92,7 +92,16 @@ class SyncResult {
 /// Ensures zero data loss for any operation across all mobile users.
 class OfflineSyncService {
   static const String _keyUniversalQueue = 'erp_universal_offline_queue_v1';
-  static const Duration _networkTimeout = Duration(seconds: 8);
+  static const Duration _defaultTimeout = Duration(seconds: 20);
+  static const Duration _largePayloadTimeout = Duration(seconds: 60);
+
+  /// Determine timeout based on payload size (e.g. base64 image uploads require more time)
+  static Duration _getTimeout(Map<String, dynamic> payload, int bodyLength) {
+    if (payload['receipt_base64'] != null || bodyLength > 50000) {
+      return _largePayloadTimeout;
+    }
+    return _defaultTimeout;
+  }
 
   /// Global reactive notifier for pending queue count
   static final ValueNotifier<int> pendingCountNotifier = ValueNotifier<int>(0);
@@ -214,24 +223,33 @@ class OfflineSyncService {
     String? userId,
   }) async {
     final url = Uri.parse('$apiBaseUrl$endpoint');
-    final jsonBody = jsonEncode(payload);
+    final resolvedPayload = Map<String, dynamic>.from(payload);
+    if (resolvedPayload['idempotency_key'] == null || resolvedPayload['idempotency_key'].toString().isEmpty) {
+      resolvedPayload['idempotency_key'] = 'idem_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
+    }
+    final jsonBody = jsonEncode(resolvedPayload);
+    final timeout = _getTimeout(resolvedPayload, jsonBody.length);
+    final headers = {
+      'Content-Type': 'application/json',
+      'x-idempotency-key': resolvedPayload['idempotency_key'].toString(),
+    };
 
     try {
       http.Response res;
       if (method.toUpperCase() == 'POST') {
         res = await http
-            .post(url, headers: {'Content-Type': 'application/json'}, body: jsonBody)
-            .timeout(_networkTimeout);
+            .post(url, headers: headers, body: jsonBody)
+            .timeout(timeout);
       } else if (method.toUpperCase() == 'PUT') {
         res = await http
-            .put(url, headers: {'Content-Type': 'application/json'}, body: jsonBody)
-            .timeout(_networkTimeout);
+            .put(url, headers: headers, body: jsonBody)
+            .timeout(timeout);
       } else if (method.toUpperCase() == 'DELETE') {
         res = await http
-            .delete(url, headers: {'Content-Type': 'application/json'}, body: jsonBody)
-            .timeout(_networkTimeout);
+            .delete(url, headers: headers, body: jsonBody)
+            .timeout(timeout);
       } else {
-        res = await http.get(url).timeout(_networkTimeout);
+        res = await http.get(url, headers: headers).timeout(timeout);
       }
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -273,7 +291,7 @@ class OfflineSyncService {
         type: type,
         endpoint: endpoint,
         method: method,
-        payload: payload,
+        payload: resolvedPayload,
         title: title,
         userId: userId,
       );
@@ -316,19 +334,30 @@ class OfflineSyncService {
     for (final action in queue) {
       try {
         final url = Uri.parse('$apiBaseUrl${action.endpoint}');
-        final body = jsonEncode(action.payload);
+        final payloadMap = Map<String, dynamic>.from(action.payload);
+        final idempotencyKey = payloadMap['idempotency_key']?.toString() ?? action.id;
+        final body = jsonEncode(payloadMap);
+        final timeout = _getTimeout(payloadMap, body.length);
+        final headers = {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        };
 
         http.Response res;
         if (action.method.toUpperCase() == 'POST') {
           res = await http
-              .post(url, headers: {'Content-Type': 'application/json'}, body: body)
-              .timeout(_networkTimeout);
+              .post(url, headers: headers, body: body)
+              .timeout(timeout);
         } else if (action.method.toUpperCase() == 'PUT') {
           res = await http
-              .put(url, headers: {'Content-Type': 'application/json'}, body: body)
-              .timeout(_networkTimeout);
+              .put(url, headers: headers, body: body)
+              .timeout(timeout);
+        } else if (action.method.toUpperCase() == 'DELETE') {
+          res = await http
+              .delete(url, headers: headers, body: body)
+              .timeout(timeout);
         } else {
-          res = await http.get(url).timeout(_networkTimeout);
+          res = await http.get(url, headers: headers).timeout(timeout);
         }
 
         if (res.statusCode >= 200 && res.statusCode < 300) {
