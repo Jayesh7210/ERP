@@ -378,7 +378,7 @@ class _LoginPageState extends State<LoginPage> {
                   controller: _identifierController,
                   decoration: InputDecoration(
                     labelText: 'Mobile Number or Email *',
-                    hintText: 'e.g. admin@erp.com or +91 99999 00001',
+                    hintText: 'Enter your email or mobile number',
                     prefixIcon: const Icon(Icons.person_outline),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     filled: true,
