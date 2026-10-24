@@ -19,6 +19,7 @@ class FsmStockAllocationModal {
     String? productName,
     required VoidCallback onStockUpdated,
   }) {
+    final parentContext = context;
     final rootMessenger = ScaffoldMessenger.of(context);
     final Map<String, int> draftAllocations = {};
     for (var s in supervisedSalesmen) {
@@ -26,18 +27,18 @@ class FsmStockAllocationModal {
     }
 
     showModalBottomSheet(
-      context: context,
+      context: parentContext,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return StatefulBuilder(
-          builder: (context, setSheetState) {
+          builder: (sheetBuilderContext, setSheetState) {
             final int totalSelected = draftAllocations.values.fold(0, (sum, v) => sum + v);
             final int remainingStock = availableDepotStock - totalSelected;
             final bool canConfirm = totalSelected > 0 && remainingStock >= 0;
 
             return Container(
-              height: MediaQuery.of(context).size.height * 0.82,
+              height: MediaQuery.of(sheetBuilderContext).size.height * 0.82,
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -270,7 +271,7 @@ class FsmStockAllocationModal {
                                         onTap: () async {
                                           final ctrl = TextEditingController(text: '$curQty');
                                           final entered = await showDialog<int>(
-                                            context: context,
+                                            context: sheetBuilderContext,
                                             builder: (dCtx) => AlertDialog(
                                               backgroundColor: Colors.white,
                                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -363,7 +364,7 @@ class FsmStockAllocationModal {
                                     onPressed: () {
                                       Navigator.pop(sheetContext);
                                       _initiateSalesmanTransfer(
-                                        context: context,
+                                        context: parentContext,
                                         fsmId: fsmId,
                                         fsmName: fsmName,
                                         bottleUnitPrice: bottleUnitPrice,
@@ -436,7 +437,7 @@ class FsmStockAllocationModal {
                                         orElse: () => {'name': 'Salesman'},
                                       );
                                       await _initiateSalesmanTransfer(
-                                        context: context,
+                                        context: parentContext,
                                         fsmId: fsmId,
                                         fsmName: fsmName,
                                         bottleUnitPrice: bottleUnitPrice,
@@ -487,25 +488,88 @@ class FsmStockAllocationModal {
     required int quantity,
     required VoidCallback onStockUpdated,
   }) async {
-    String resolvedProdId = productId ?? '';
-    String resolvedProdName = productName ?? 'Water Bottle';
+    if (!context.mounted) return;
 
-    if (resolvedProdId.isEmpty) {
-      try {
-        final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
-        if (res.statusCode == 200) {
-          final list = jsonDecode(res.body);
-          if (list is List && list.isNotEmpty) {
-            resolvedProdId = list.first['id']?.toString() ?? '';
-            resolvedProdName = list.first['name']?.toString() ?? 'Water Bottle';
-          }
-        }
-      } catch (_) {}
-    }
-
-    String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
+    BuildContext? loadingCtx;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) {
+        loadingCtx = dCtx;
+        return Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(strokeWidth: 3, color: ClientColors.primary),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Generating Handoff QR Code...',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: ClientColors.textDark),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Allocating $quantity bottles to $salesmanName',
+                  style: const TextStyle(fontSize: 12, color: ClientColors.textMuted),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
 
     try {
+      String resolvedProdId = productId ?? '';
+      String resolvedProdName = productName ?? 'Water Bottle';
+
+      if (resolvedProdId.isEmpty) {
+        try {
+          final stockRes = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/$fsmId'));
+          if (stockRes.statusCode == 200) {
+            final stockList = jsonDecode(stockRes.body);
+            if (stockList is List && stockList.isNotEmpty) {
+              final st = stockList.first;
+              resolvedProdId = st['product_id']?.toString() ?? '';
+              if (st['product'] != null && st['product']['name'] != null) {
+                resolvedProdName = st['product']['name'].toString();
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (resolvedProdId.isEmpty) {
+        try {
+          final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/products'));
+          if (res.statusCode == 200) {
+            final list = jsonDecode(res.body);
+            if (list is List && list.isNotEmpty) {
+              resolvedProdId = list.first['id']?.toString() ?? '';
+              resolvedProdName = list.first['name']?.toString() ?? 'Water Bottle';
+            }
+          }
+        } catch (_) {}
+      }
+
+      String transferId = 'tr_${DateTime.now().millisecondsSinceEpoch}';
+
       final result = await OfflineSyncService.executeWithOfflineFallback(
         apiBaseUrl: AppState.apiBaseUrl,
         endpoint: '/stock/transfer',
@@ -522,6 +586,11 @@ class FsmStockAllocationModal {
           'status': 'pending',
         },
       );
+
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.pop(loadingCtx!);
+        loadingCtx = null;
+      }
 
       if (result['success'] != true) {
         if (!context.mounted) return;
@@ -542,37 +611,55 @@ class FsmStockAllocationModal {
       } else if (result['action_id'] != null) {
         transferId = result['action_id'].toString();
       }
-    } catch (_) {}
 
-    final securityPin = (transferId.hashCode.abs() % 900000 + 100000).toString();
-    final qrPayload = jsonEncode({
-      'type': 'FSM_TO_SALESMAN_TRANSFER',
-      'transfer_id': transferId,
-      'from_fsm_id': fsmId,
-      'from_fsm_name': fsmName,
-      'to_salesman_id': salesmanId,
-      'salesman_name': salesmanName,
-      'product_id': resolvedProdId,
-      'product_name': resolvedProdName,
-      'quantity': quantity,
-      'security_pin': securityPin,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+      final securityPin = (transferId.hashCode.abs() % 900000 + 100000).toString();
+      final qrPayload = jsonEncode({
+        'type': 'FSM_TO_SALESMAN_TRANSFER',
+        'transfer_id': transferId,
+        'from_fsm_id': fsmId,
+        'from_fsm_name': fsmName,
+        'to_salesman_id': salesmanId,
+        'salesman_name': salesmanName,
+        'product_id': resolvedProdId,
+        'product_name': resolvedProdName,
+        'quantity': quantity,
+        'security_pin': securityPin,
+        'created_at': DateTime.now().toIso8601String(),
+      });
 
-    if (!context.mounted) return;
-    showSalesmanHandoffQrModal(
-      context: context,
-      fsmId: fsmId,
-      transferId: transferId,
-      salesmanId: salesmanId,
-      salesmanName: salesmanName,
-      productName: resolvedProdName,
-      quantity: quantity,
-      securityPin: securityPin,
-      qrPayload: qrPayload,
-      bottleUnitPrice: bottleUnitPrice,
-      onStockUpdated: onStockUpdated,
-    );
+      if (!context.mounted) return;
+      showSalesmanHandoffQrModal(
+        context: context,
+        fsmId: fsmId,
+        transferId: transferId,
+        salesmanId: salesmanId,
+        salesmanName: salesmanName,
+        productName: resolvedProdName,
+        quantity: quantity,
+        securityPin: securityPin,
+        qrPayload: qrPayload,
+        bottleUnitPrice: bottleUnitPrice,
+        onStockUpdated: onStockUpdated,
+      );
+    } catch (e) {
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.pop(loadingCtx!);
+        loadingCtx = null;
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade800,
+            content: Text('⚠️ Error initiating transfer: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (loadingCtx != null && loadingCtx!.mounted) {
+        Navigator.pop(loadingCtx!);
+      }
+    }
   }
 
   static void showSalesmanHandoffQrModal({
@@ -599,13 +686,13 @@ class FsmStockAllocationModal {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             Future<void> checkAcceptStatus() async {
-              if (isTransferAccepted || isChecking) return;
+              if (isTransferAccepted || isChecking || !dialogCtx.mounted) return;
               setDialogState(() => isChecking = true);
               try {
                 final res = await http.get(
                   Uri.parse('${AppState.apiBaseUrl}/stock/transfers?from_id=$fsmId'),
                 );
-                if (res.statusCode == 200) {
+                if (res.statusCode == 200 && dialogCtx.mounted) {
                   final list = List<Map<String, dynamic>>.from(jsonDecode(res.body));
                   final tr = list.firstWhere(
                     (t) => t['id']?.toString() == transferId,
@@ -613,24 +700,32 @@ class FsmStockAllocationModal {
                   );
                   if (tr.isNotEmpty && tr['status'] == 'completed') {
                     pollTimer?.cancel();
-                    setDialogState(() {
-                      isTransferAccepted = true;
-                      isChecking = false;
-                    });
+                    if (dialogCtx.mounted) {
+                      setDialogState(() {
+                        isTransferAccepted = true;
+                        isChecking = false;
+                      });
+                    }
                     onStockUpdated();
                     return;
                   }
                 }
               } catch (_) {}
-              setDialogState(() => isChecking = false);
+              if (dialogCtx.mounted) {
+                setDialogState(() => isChecking = false);
+              }
             }
 
             pollTimer ??= Timer.periodic(const Duration(seconds: 3), (_) {
               checkAcceptStatus();
             });
 
-            return Dialog(
-              backgroundColor: Colors.white,
+            return PopScope(
+              onPopInvokedWithResult: (didPop, result) {
+                pollTimer?.cancel();
+              },
+              child: Dialog(
+                backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               child: SingleChildScrollView(
@@ -881,6 +976,7 @@ class FsmStockAllocationModal {
                   ),
                 ),
               ),
+            ),
             );
           },
         );
