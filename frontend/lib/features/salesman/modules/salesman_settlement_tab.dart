@@ -77,8 +77,9 @@ class _SalesmanSettlementTabState extends State<SalesmanSettlementTab> {
   }
   @override
   Widget build(BuildContext context) {
-    final int heldStock =
-        widget.currentStock > 0 ? widget.currentStock : widget.totalDispatchedBottles;
+    final int heldStock = widget.totalDispatchedBottles > 0
+        ? widget.totalDispatchedBottles
+        : (widget.currentStock + widget.soldToday);
     final int damaged = widget.hasDamagedBottles ? widget.damagedBottles : 0;
     final int maxAllowed = (heldStock - damaged).clamp(0, heldStock);
     final int remaining =

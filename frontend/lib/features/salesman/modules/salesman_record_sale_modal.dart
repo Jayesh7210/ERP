@@ -6,6 +6,8 @@ import '../../../core/services/offline_sales_service.dart';
 import '../../../core/state/app_state.dart';
 
 class SalesmanRecordSaleModal {
+  static String? _cachedProductId;
+
   static void show({
     required BuildContext context,
     required String salesmanId,
@@ -24,6 +26,7 @@ class SalesmanRecordSaleModal {
     final saleCustAddressCtrl = TextEditingController();
     final saleQtyCtrl = TextEditingController(text: '1');
     String salePaymentMode = 'cash';
+    bool isSubmitting = false;
 
     showModalBottomSheet(
       context: context,
@@ -37,247 +40,322 @@ class SalesmanRecordSaleModal {
           final qty = int.tryParse(saleQtyCtrl.text) ?? 1;
           final totalAmt = qty * unitPrice;
 
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 20,
-              right: 20,
-              top: 20,
-              bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 20,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Record Sale',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: ClientColors.textDark,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(modalCtx),
-                      ),
-                    ],
-                  ),
-                  const Text(
-                    'Log bottles sold directly to retail customer.',
-                    style: TextStyle(fontSize: 12, color: ClientColors.textMuted),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Customer Toggle
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('Existing Customer')),
-                          selected: !isNewCustomer,
-                          selectedColor: ClientColors.alertBg,
-                          onSelected: (val) => setModalState(() => isNewCustomer = false),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Center(child: Text('+ New Customer')),
-                          selected: isNewCustomer,
-                          selectedColor: ClientColors.alertBg,
-                          onSelected: (val) => setModalState(() => isNewCustomer = true),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  if (!isNewCustomer) ...[
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Select Customer',
-                        border: OutlineInputBorder(),
-                      ),
-                      initialValue: saleCustomerId,
-                      items: customers
-                          .map(
-                            (c) => DropdownMenuItem<String>(
-                              value: c['id']?.toString(),
-                              child: Text('${c['name']}'),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (val) => setModalState(() => saleCustomerId = val),
-                    ),
-                  ] else ...[
-                    TextField(
-                      controller: saleCustNameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Customer / Shop Name *',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: saleCustPhoneCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone Number',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: saleCustAddressCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Market Location / Address',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-
-                  // Super Admin Price Banner
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.amber.shade200),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.lock, size: 16, color: ClientColors.primary),
-                            SizedBox(width: 6),
-                            Text(
-                              'Retail Price (Super Admin):',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: ClientColors.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        bottleUnitPrice != null
-                            ? Text(
-                                '₹$bottleUnitPrice / btl',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  color: ClientColors.textDark,
-                                ),
-                              )
-                            : const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: ClientColors.primary,
-                                ),
-                              ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Quantity
-                  TextField(
-                    controller: saleQtyCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Quantity (Bottles)',
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => setModalState(() {}),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Total Amount Box
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: ClientColors.alertBg,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
+          return PopScope(
+            canPop: !isSubmitting,
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text(
-                          'Total Amount to Collect:',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          '₹${totalAmt.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
+                          'Record Sale',
+                          style: TextStyle(
                             fontSize: 18,
-                            color: ClientColors.primary,
+                            fontWeight: FontWeight.bold,
+                            color: ClientColors.textDark,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: isSubmitting ? null : () => Navigator.pop(modalCtx),
+                        ),
+                      ],
+                    ),
+                    const Text(
+                      'Log bottles sold directly to retail customer.',
+                      style: TextStyle(fontSize: 12, color: ClientColors.textMuted),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Customer Toggle
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('Existing Customer')),
+                            selected: !isNewCustomer,
+                            selectedColor: ClientColors.alertBg,
+                            onSelected: isSubmitting
+                                ? null
+                                : (val) => setModalState(() => isNewCustomer = false),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('+ New Customer')),
+                            selected: isNewCustomer,
+                            selectedColor: ClientColors.alertBg,
+                            onSelected: isSubmitting
+                                ? null
+                                : (val) => setModalState(() => isNewCustomer = true),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
 
-                  // Payment Mode
-                  Row(
-                    children: [
-                      ChoiceChip(
-                        label: const Text('💵 Cash'),
-                        selected: salePaymentMode == 'cash',
-                        selectedColor: Colors.green.shade100,
-                        onSelected: (val) => setModalState(() => salePaymentMode = 'cash'),
+                    if (!isNewCustomer) ...[
+                      DropdownButtonFormField<String>(
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Select Customer',
+                          border: OutlineInputBorder(),
+                        ),
+                        initialValue: saleCustomerId,
+                        items: customers
+                            .map(
+                              (c) => DropdownMenuItem<String>(
+                                value: c['id']?.toString(),
+                                child: Text('${c['name']}'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: isSubmitting
+                            ? null
+                            : (val) => setModalState(() => saleCustomerId = val),
                       ),
-                      const SizedBox(width: 8),
-                      ChoiceChip(
-                        label: const Text('📱 Online / UPI'),
-                        selected: salePaymentMode == 'online',
-                        selectedColor: Colors.blue.shade100,
-                        onSelected: (val) => setModalState(() => salePaymentMode = 'online'),
+                    ] else ...[
+                      TextField(
+                        controller: saleCustNameCtrl,
+                        enabled: !isSubmitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Customer / Shop Name *',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: saleCustPhoneCtrl,
+                        enabled: !isSubmitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Phone Number',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: saleCustAddressCtrl,
+                        enabled: !isSubmitting,
+                        decoration: const InputDecoration(
+                          labelText: 'Market Location / Address',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 12),
 
-                  ElevatedButton(
-                    onPressed: () async {
-                      Navigator.pop(modalCtx);
-                      await _executeSale(
-                        context: context,
-                        salesmanId: salesmanId,
-                        unitPrice: unitPrice,
-                        bottleUnitPrice: bottleUnitPrice,
-                        totalDispatchedBottles: totalDispatchedBottles,
-                        currentSettlementSoldBottles: currentSettlementSoldBottles,
-                        qty: qty,
-                        productId: productId,
-                        totalAmt: totalAmt,
-                        salePaymentMode: salePaymentMode,
-                        isNewCustomer: isNewCustomer,
-                        saleCustomerId: saleCustomerId,
-                        custName: saleCustNameCtrl.text.trim(),
-                        custPhone: saleCustPhoneCtrl.text.trim(),
-                        custAddress: saleCustAddressCtrl.text.trim(),
-                        onSaleSuccess: onSaleSuccess,
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ClientColors.primary,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size.fromHeight(48),
+                    // Super Admin Price Banner
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.lock, size: 16, color: ClientColors.primary),
+                              SizedBox(width: 6),
+                              Text(
+                                'Retail Price (Super Admin):',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: ClientColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          bottleUnitPrice != null
+                              ? Text(
+                                  '₹$bottleUnitPrice / btl',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: ClientColors.textDark,
+                                  ),
+                                )
+                              : const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: ClientColors.primary,
+                                  ),
+                                ),
+                        ],
+                      ),
                     ),
-                    child: const Text('Confirm & Complete Sale'),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+
+                    // Quantity
+                    TextField(
+                      controller: saleQtyCtrl,
+                      enabled: !isSubmitting,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity (Bottles)',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setModalState(() {}),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Total Amount Box
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: ClientColors.alertBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Total Amount to Collect:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '₹${totalAmt.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                              color: ClientColors.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Payment Mode
+                    Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('💵 Cash'),
+                          selected: salePaymentMode == 'cash',
+                          selectedColor: Colors.green.shade100,
+                          onSelected: isSubmitting
+                              ? null
+                              : (val) => setModalState(() => salePaymentMode = 'cash'),
+                        ),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: const Text('📱 Online / UPI'),
+                          selected: salePaymentMode == 'online',
+                          selectedColor: Colors.blue.shade100,
+                          onSelected: isSubmitting
+                              ? null
+                              : (val) => setModalState(() => salePaymentMode = 'online'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    ElevatedButton(
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              final currentQty = int.tryParse(saleQtyCtrl.text) ?? 0;
+                              if (currentQty <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('⚠️ Please enter a valid quantity (at least 1 bottle)'),
+                                    backgroundColor: Colors.orange,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                return;
+                              }
+                              if (isNewCustomer && saleCustNameCtrl.text.trim().isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('⚠️ Please enter customer or shop name'),
+                                    backgroundColor: Colors.orange,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              setModalState(() => isSubmitting = true);
+
+                              final success = await _executeSale(
+                                context: context,
+                                modalContext: modalCtx,
+                                salesmanId: salesmanId,
+                                unitPrice: unitPrice,
+                                bottleUnitPrice: bottleUnitPrice,
+                                totalDispatchedBottles: totalDispatchedBottles,
+                                currentSettlementSoldBottles: currentSettlementSoldBottles,
+                                qty: currentQty,
+                                productId: productId,
+                                totalAmt: currentQty * unitPrice,
+                                salePaymentMode: salePaymentMode,
+                                isNewCustomer: isNewCustomer,
+                                saleCustomerId: saleCustomerId,
+                                custName: saleCustNameCtrl.text.trim(),
+                                custPhone: saleCustPhoneCtrl.text.trim(),
+                                custAddress: saleCustAddressCtrl.text.trim(),
+                                onSaleSuccess: onSaleSuccess,
+                              );
+
+                              if (!success && modalCtx.mounted) {
+                                setModalState(() => isSubmitting = false);
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: ClientColors.primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: ClientColors.primary.withValues(alpha: 0.65),
+                        disabledForegroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      child: isSubmitting
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Text(
+                                  'Completing Sale...',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const Text(
+                              'Confirm & Complete Sale',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -286,8 +364,9 @@ class SalesmanRecordSaleModal {
     );
   }
 
-  static Future<void> _executeSale({
+  static Future<bool> _executeSale({
     required BuildContext context,
+    required BuildContext modalContext,
     required String salesmanId,
     String? productId,
     required double unitPrice,
@@ -306,7 +385,7 @@ class SalesmanRecordSaleModal {
   }) async {
     String resolvedProdId = (productId != null && productId.isNotEmpty && productId != 'p1')
         ? productId
-        : '';
+        : (_cachedProductId ?? '');
 
     if (resolvedProdId.isEmpty) {
       try {
@@ -315,9 +394,12 @@ class SalesmanRecordSaleModal {
           final pList = jsonDecode(pRes.body);
           if (pList is List && pList.isNotEmpty) {
             resolvedProdId = pList.first['id']?.toString() ?? '';
+            _cachedProductId = resolvedProdId;
           }
         }
       } catch (_) {}
+    } else {
+      _cachedProductId = resolvedProdId;
     }
 
     final result = await OfflineSalesService.recordSale(
@@ -343,7 +425,7 @@ class SalesmanRecordSaleModal {
           ),
         );
       }
-      return;
+      return false;
     }
 
     final bool isOffline = result['is_offline'] == true;
@@ -352,9 +434,20 @@ class SalesmanRecordSaleModal {
     final int newSettlementSold =
         (currentSettlementSoldBottles + qty).clamp(0, totalDispatchedBottles);
 
+    // Close the record sale modal immediately before opening the completion dialog
+    if (modalContext.mounted) {
+      Navigator.pop(modalContext);
+    }
+
     onSaleSuccess(qty, totalAmt, newSettlementSold);
 
     if (context.mounted) {
+      final effectiveUnitPrice = unitPrice > 0
+          ? unitPrice
+          : (bottleUnitPrice != null && bottleUnitPrice > 0
+              ? bottleUnitPrice
+              : (qty > 0 ? (totalAmt / qty) : 0.0));
+
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -409,7 +502,7 @@ class SalesmanRecordSaleModal {
               _dialogRow('Bottles Sold:', '$qty Bottles'),
               _dialogRow(
                 'Unit Price:',
-                bottleUnitPrice != null ? '₹$bottleUnitPrice' : 'Loading...',
+                effectiveUnitPrice > 0 ? '₹${effectiveUnitPrice.toStringAsFixed(0)}' : '₹$unitPrice',
               ),
               _dialogRow('Total Collected:', '₹$totalAmt'),
               _dialogRow('Payment Mode:', salePaymentMode.toUpperCase()),
@@ -429,6 +522,7 @@ class SalesmanRecordSaleModal {
         ),
       );
     }
+    return true;
   }
 
   static Widget _dialogRow(String label, String value) {

@@ -118,8 +118,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   void _prefillSettlementDefaults({bool force = false}) {
     if (_hasUserModifiedSettlement && !force) return;
 
-    final int heldStock = _currentStock > 0 ? _currentStock : _totalDispatchedBottles;
-    final int prefillQty = heldStock > 0 ? _unsettledSoldToday.clamp(0, heldStock) : _unsettledSoldToday;
+    final int totalAllocated = _totalDispatchedBottles > 0
+        ? _totalDispatchedBottles
+        : (_unsettledSoldToday + _currentStock);
+    final int prefillQty = totalAllocated > 0
+        ? _unsettledSoldToday.clamp(0, totalAllocated)
+        : _unsettledSoldToday;
 
     _settlementSoldBottles = prefillQty;
     _soldBottlesInputCtrl.text = '$prefillQty';
@@ -422,7 +426,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           if (todayData['bottles_dispatched'] != null) {
             final activeDisp = (todayData['bottles_dispatched'] as num).toInt();
             _totalDispatchedBottles = activeDisp;
-            _currentStock = activeDisp;
+          }
+          if (todayData['current_stock'] != null) {
+            _currentStock = (todayData['current_stock'] as num).toInt();
+          } else if (_totalDispatchedBottles > 0) {
+            _currentStock = (_totalDispatchedBottles - _unsettledSoldToday).clamp(0, _totalDispatchedBottles);
           }
         }
         setState(() {
@@ -699,10 +707,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     setState(() => _isGeneratingSettlementQr = true);
 
     try {
-      final int heldStock = _currentStock > 0 ? _currentStock : _totalDispatchedBottles;
+      final int totalAllocated = _totalDispatchedBottles > 0
+          ? _totalDispatchedBottles
+          : (_unsettledSoldToday + _currentStock);
       final int damaged = _hasDamagedBottles ? _damagedBottles : 0;
       final int sold = _settlementSoldBottles;
-      final int remaining = (heldStock - sold - damaged).clamp(0, heldStock);
+      final int remaining = (totalAllocated - sold - damaged).clamp(0, totalAllocated);
       final int soldAmt = (sold * _unitPrice).toInt();
       final int cash = double.tryParse(_cashHandoverCtrl.text.trim())?.toInt() ?? 0;
       final int online = double.tryParse(_onlinePaymentCtrl.text.trim())?.toInt() ?? 0;
@@ -721,7 +731,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             'salesman_name': _salesmanName,
             'fsm_id': fsmId,
             'fsm_name': fsmName,
-            'bottles_dispatched': heldStock,
+            'bottles_dispatched': totalAllocated,
             'bottles_sold': sold,
             'remaining_qty': remaining,
             'damaged_qty': damaged,
@@ -752,7 +762,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         'salesman_name': _salesmanName,
         'fsm_id': fsmId,
         'fsm_name': fsmName,
-        'bottles_dispatched': heldStock,
+        'bottles_dispatched': totalAllocated,
         'bottles_sold': sold,
         'remaining_qty': remaining,
         'damaged_qty': damaged,
@@ -772,7 +782,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         context: context,
         settlementId: settlementId,
         fsmName: fsmName,
-        heldStock: heldStock,
+        heldStock: totalAllocated,
         sold: sold,
         remaining: remaining,
         damaged: damaged,
@@ -800,7 +810,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             _settlementHistory.insert(0, {
               'id': settlementId,
               'date_label': 'Today, Just Now',
-              'bottles_dispatched': heldStock,
+              'bottles_dispatched': totalAllocated,
               'bottles_sold': sold,
               'remaining_qty': remaining,
               'damaged_qty': damaged,

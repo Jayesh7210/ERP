@@ -182,7 +182,16 @@ class SalesmanDashboardTab extends StatelessWidget {
                             ),
                             const SizedBox(height: 3),
                             Text('₹${commission.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text('${earningsData['sold_bottles_today'] ?? soldToday} bottles sold today', style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                            Text(
+                              (earningsData['slab_bonus_earned'] as num? ?? 0) > 0
+                                  ? '${earningsData['sold_bottles_today'] ?? soldToday} bottles (+₹${(earningsData['slab_bonus_earned'] as num).toInt()} slab bonus)'
+                                  : '${earningsData['sold_bottles_today'] ?? soldToday} bottles sold today',
+                              style: TextStyle(
+                                color: (earningsData['slab_bonus_earned'] as num? ?? 0) > 0 ? const Color(0xFFFDE68A) : Colors.white60,
+                                fontSize: 10,
+                                fontWeight: (earningsData['slab_bonus_earned'] as num? ?? 0) > 0 ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
                           ],
                         ),
                       ),

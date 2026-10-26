@@ -260,9 +260,9 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                         ...slabs.asMap().entries.map((entry) {
                           final idx = entry.key;
                           final slab = entry.value;
-                          final baseP = double.tryParse(basePriceCtrl.text) ?? 0.0;
+                          final salesmanC = double.tryParse(salesmanCommCtrl.text) ?? 0.0;
                           final addedC = double.tryParse(slab['added_commission']?.toString() ?? '0') ?? 0.0;
-                          final totalP = baseP + addedC;
+                          final totalComm = salesmanC + addedC;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 6),
@@ -284,7 +284,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                       ),
                                       Text(
-                                        '+₹${addedC.toStringAsFixed(1)} commission',
+                                        'Base ₹${salesmanC.toStringAsFixed(1)} + ₹${addedC.toStringAsFixed(1)} bonus',
                                         style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
                                       ),
                                     ],
@@ -298,7 +298,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                     border: Border.all(color: Colors.green.shade200),
                                   ),
                                   child: Text(
-                                    '₹${totalP.toStringAsFixed(1)}/ea',
+                                    'Comm: ₹${totalComm.toStringAsFixed(1)}/ea',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
@@ -834,6 +834,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
         builder: (ctx, setDlgState) {
           final currentBase = double.tryParse(basePriceCtrl.text) ?? 50.0;
           final currentInit = int.tryParse(initialStockCtrl.text) ?? 100;
+          final currentSalesmanComm = double.tryParse(salesmanCommCtrl.text) ?? 0.0;
 
           return AlertDialog(
             title: Row(
@@ -907,7 +908,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '💡 1st to $currentInit units sell at base price of ₹$currentBase each.',
+                            '💡 1st to $currentInit units sell at base price of ₹$currentBase each (base salesman commission: ₹$currentSalesmanComm).',
                             style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontStyle: FontStyle.italic),
                           ),
                         ],
@@ -973,7 +974,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 8),
                               child: Text(
-                                'No surge slabs added yet. Any units sold above $currentInit will remain at ₹$currentBase.',
+                                'No surge slabs added yet. Any units sold above $currentInit will earn standard salesman commission of ₹$currentSalesmanComm.',
                                 style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
                               ),
                             )
@@ -982,7 +983,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                               final idx = entry.key;
                               final slab = entry.value;
                               final addedComm = double.tryParse(slab['added_commission']?.toString() ?? '0') ?? 0.0;
-                              final resultingPrice = currentBase + addedComm;
+                              final effectiveComm = currentSalesmanComm + addedComm;
 
                               final fromCtrl = TextEditingController(text: slab['from_qty']?.toString() ?? '');
                               final toCtrl = TextEditingController(text: slab['to_qty']?.toString() ?? '');
@@ -1018,7 +1019,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                         ),
                                         const Spacer(),
                                         Text(
-                                          'Effective Price: ₹${resultingPrice.toStringAsFixed(1)}/ea',
+                                          'Effective Comm: ₹${effectiveComm.toStringAsFixed(1)}/ea',
                                           style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.bold,
@@ -1144,6 +1145,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                               prefixText: '₹ ',
                             ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            onChanged: (_) => setDlgState(() {}),
                           ),
                           const SizedBox(height: 10),
                           TextField(
@@ -1384,14 +1386,23 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                     const Icon(Icons.check_circle_outline, size: 16, color: AppColors.primary),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        '1 to $initialStock ${product['unit'] ?? 'units'} (Base Quota)',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '1 to $initialStock ${product['unit'] ?? 'units'} (Base Quota)',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Selling Price: ₹${basePrice.toStringAsFixed(1)} / ea',
+                            style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary),
+                          ),
+                        ],
                       ),
                     ),
                     Text(
-                      '₹${basePrice.toStringAsFixed(1)} / ea',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      'Comm: ₹${salesmanComm.toStringAsFixed(1)} / ea',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
                     ),
                   ],
                 ),
@@ -1402,7 +1413,7 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                 final idx = e.key;
                 final s = e.value;
                 final added = double.tryParse(s['added_commission']?.toString() ?? '0') ?? 0.0;
-                final effectiveP = basePrice + added;
+                final effectiveComm = salesmanComm + added;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.all(10),
@@ -1424,15 +1435,15 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              '₹$basePrice base + ₹$added commission',
+                              'Selling Price: ₹${basePrice.toStringAsFixed(1)} • Base ₹$salesmanComm + ₹$added bonus comm',
                               style: TextStyle(fontSize: 10.5, color: Colors.amber.shade900),
                             ),
                           ],
                         ),
                       ),
                       Text(
-                        '₹${effectiveP.toStringAsFixed(1)} / ea',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green.shade900),
+                        '₹${effectiveComm.toStringAsFixed(1)} comm/ea',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green.shade900),
                       ),
                     ],
                   ),
@@ -2082,7 +2093,8 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                     final sIdx = e.key;
                                     final s = e.value;
                                     final added = double.tryParse(s['added_commission']?.toString() ?? '0') ?? 0.0;
-                                    final effectiveP = basePrice + added;
+                                    final salesmanComm = getRoleComm(p, 'salesman_commission');
+                                    final effectiveComm = salesmanComm + added;
 
                                     return Container(
                                       margin: const EdgeInsets.only(bottom: 6),
@@ -2105,18 +2117,25 @@ class _CatalogPricingModuleState extends State<CatalogPricingModule>
                                                   style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
                                                 ),
                                                 Text(
-                                                  '₹$basePrice base + ₹$added added commission',
+                                                  'Selling Price: ₹${basePrice.toStringAsFixed(1)} • Salesman Comm: ₹$salesmanComm base + ₹$added bonus',
                                                   style: TextStyle(fontSize: 10, color: Colors.amber.shade900),
                                                 ),
                                               ],
                                             ),
                                           ),
-                                          Text(
-                                            '₹${effectiveP.toStringAsFixed(1)} / ea',
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.green.shade900,
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.shade100,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              '₹${effectiveComm.toStringAsFixed(1)} comm/ea',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green.shade900,
+                                              ),
                                             ),
                                           ),
                                         ],

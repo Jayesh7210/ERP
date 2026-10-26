@@ -1049,6 +1049,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
     final phoneCtrl = TextEditingController(text: editUser?['phone'] ?? '');
     final passwordCtrl = TextEditingController(text: editUser?['password'] ?? '');
     final aadhaarCtrl = TextEditingController(text: editUser?['aadhaar_number'] ?? '');
+    String selectedDocType = (editUser?['doc_type'] ?? 'Aadhaar Card').toString();
     
     final rawKycDoc = (editUser?['aadhaar_doc'] ?? editUser?['kyc_doc'] ?? '').toString();
     String selectedKycDoc = (rawKycDoc == 'Aadhaar_Document.pdf') ? '' : rawKycDoc;
@@ -1092,7 +1093,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Attached Aadhaar Document: ${picked.name}'),
+                        content: Text('Attached KYC Document: ${picked.name}'),
                         backgroundColor: Colors.green,
                       ),
                     );
@@ -1120,12 +1121,12 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(bottom: 8),
-                          child: Text('Attach Aadhaar Document / KYC', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          child: Text('Attach ID Proof Document', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                         ),
                         ListTile(
                           leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
                           title: const Text('Take Photo with Camera'),
-                          subtitle: const Text('Capture clear photo of physical Aadhaar card'),
+                          subtitle: const Text('Capture clear photo of physical ID proof'),
                           onTap: () {
                             Navigator.pop(sheetCtx);
                             pickStaffDoc(ImageSource.camera);
@@ -1133,8 +1134,8 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                         ),
                         ListTile(
                           leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
-                          title: const Text('Choose from Gallery / Device'),
-                          subtitle: const Text('Select Aadhaar card image or scan'),
+                          title: const Text('Choose from Gallery / Photos'),
+                          subtitle: const Text('Select existing photo or scan'),
                           onTap: () {
                             Navigator.pop(sheetCtx);
                             pickStaffDoc(ImageSource.gallery);
@@ -1210,20 +1211,45 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                     ),
                     const SizedBox(height: 12),
 
-                    // Aadhaar Card Number
+                    // Document / ID Proof Type
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedDocType,
+                      decoration: InputDecoration(
+                        labelText: 'Document / ID Proof Type',
+                        prefixIcon: const Icon(Icons.badge_outlined),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'Aadhaar Card', child: Text('Aadhaar Card')),
+                        DropdownMenuItem(value: 'PAN Card', child: Text('PAN Card')),
+                        DropdownMenuItem(value: 'Driving License', child: Text('Driving License')),
+                        DropdownMenuItem(value: 'Voter ID', child: Text('Voter ID')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() => selectedDocType = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Document / ID Proof Number
                     TextField(
                       controller: aadhaarCtrl,
-                      keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Aadhaar Card Number (Govt ID) *',
-                        hintText: '12-digit Aadhaar number',
+                        labelText: selectedDocType == 'Aadhaar Card'
+                            ? 'Aadhaar Card Number (Govt ID) *'
+                            : '$selectedDocType Number *',
+                        hintText: selectedDocType == 'Aadhaar Card'
+                            ? '12-digit Aadhaar number'
+                            : 'Enter $selectedDocType number',
                         prefixIcon: const Icon(Icons.credit_card),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
                     const SizedBox(height: 12),
 
-                    // Aadhaar Document Attachment
+                    // KYC Document / Proof (exact same name as salesman refer in salesman tab)
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -1247,7 +1273,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                               const SizedBox(width: 8),
                               const Expanded(
                                 child: Text(
-                                  'Aadhaar Document (KYC)',
+                                  'KYC Document / Proof',
                                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1446,8 +1472,11 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                             'email': emailCtrl.text.trim(),
                             'phone': phoneCtrl.text.trim(),
                             'password': passwordCtrl.text.trim(),
+                            'doc_type': selectedDocType,
                             'aadhaar_number': aadhaarCtrl.text.trim(),
+                            'id_number': aadhaarCtrl.text.trim(),
                             'aadhaar_doc': selectedKycBase64 ?? selectedKycDoc,
+                            'kyc_doc': selectedKycBase64 ?? selectedKycDoc,
                             'role': selectedRole,
                             'warehouse_id': selectedWarehouseId,
                             'parent_id': selectedParentId,
@@ -2190,10 +2219,10 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                   const SizedBox(height: 12),
                   TextField(controller: _passwordReqController, decoration: const InputDecoration(labelText: 'Initial Password *')),
                   const SizedBox(height: 12),
-                  TextField(controller: _aadhaarReqController, decoration: const InputDecoration(labelText: 'Aadhaar Card Number *', hintText: '12-digit number')),
+                  TextField(controller: _aadhaarReqController, decoration: const InputDecoration(labelText: 'Document / ID Proof Number *', hintText: 'Enter ID proof / Aadhaar number')),
                   const SizedBox(height: 12),
 
-                  // Aadhaar Document Upload
+                  // KYC Document Upload
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -2217,7 +2246,7 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                             const SizedBox(width: 8),
                             const Expanded(
                               child: Text(
-                                'Upload Aadhaar Card (KYC)',
+                                'KYC Document / Proof',
                                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -2300,12 +2329,12 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                     children: [
                                       const Padding(
                                         padding: EdgeInsets.only(bottom: 8),
-                                        child: Text('Attach Aadhaar Document / KYC', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                        child: Text('Attach ID Proof Document', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                                       ),
                                       ListTile(
                                         leading: const CircleAvatar(backgroundColor: Colors.blue, child: Icon(Icons.camera_alt, color: Colors.white)),
                                         title: const Text('Take Photo with Camera'),
-                                        subtitle: const Text('Capture clear photo of physical Aadhaar card'),
+                                        subtitle: const Text('Capture clear photo of physical ID proof'),
                                         onTap: () async {
                                           Navigator.pop(sheetCtx);
                                           try {
@@ -2325,8 +2354,8 @@ class _WorkforceRequestsPageState extends State<WorkforceRequestsPage> with Sing
                                       ),
                                       ListTile(
                                         leading: const CircleAvatar(backgroundColor: Colors.orange, child: Icon(Icons.photo_library, color: Colors.white)),
-                                        title: const Text('Choose from Gallery / Device'),
-                                        subtitle: const Text('Select Aadhaar card image or scan'),
+                                        title: const Text('Choose from Gallery / Photos'),
+                                        subtitle: const Text('Select existing photo or scan'),
                                         onTap: () async {
                                           Navigator.pop(sheetCtx);
                                           try {
