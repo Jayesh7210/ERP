@@ -32,30 +32,7 @@ class SalesmanReceiveStockModal {
     required Function(int quantity, String productName, int amount) onStockReceived,
     required VoidCallback onReloadData,
   }) async {
-    List<Map<String, dynamic>> pendingTransfers = [];
-    try {
-      final res = await http.get(
-        Uri.parse('${AppState.apiBaseUrl}/stock/transfers?to_id=$salesmanId&status=pending'),
-      );
-      if (res.statusCode == 200) {
-        pendingTransfers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-      }
-    } catch (_) {}
-
-    if (pendingTransfers.isEmpty) {
-      try {
-        final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/transfers?status=pending'));
-        if (res.statusCode == 200) {
-          final all = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-          pendingTransfers =
-              all.where((t) => t['to_id'] == salesmanId && t['status'] == 'pending').toList();
-        }
-      } catch (_) {}
-    }
-
-    if (!context.mounted) return;
-
-    showModalBottomSheet(
+    return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.white,
@@ -63,14 +40,49 @@ class SalesmanReceiveStockModal {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) {
-        Map<String, dynamic>? selectedTransfer =
-            pendingTransfers.isNotEmpty ? pendingTransfers.first : null;
+        List<Map<String, dynamic>> pendingTransfers = [];
+        Map<String, dynamic>? selectedTransfer;
         final pinController = TextEditingController();
         bool isProcessing = false;
         bool isVerifying = false;
+        bool isLoadingTransfers = true;
+        bool hasInitiatedFetch = false;
 
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            if (!hasInitiatedFetch) {
+              hasInitiatedFetch = true;
+              Future.microtask(() async {
+                List<Map<String, dynamic>> fetched = [];
+                try {
+                  final res = await http.get(
+                    Uri.parse('${AppState.apiBaseUrl}/stock/transfers?to_id=$salesmanId&status=pending'),
+                  );
+                  if (res.statusCode == 200) {
+                    fetched = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+                  }
+                } catch (_) {}
+
+                if (fetched.isEmpty) {
+                  try {
+                    final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/transfers?status=pending'));
+                    if (res.statusCode == 200) {
+                      final all = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+                      fetched =
+                          all.where((t) => t['to_id'] == salesmanId && t['status'] == 'pending').toList();
+                    }
+                  } catch (_) {}
+                }
+
+                if (sheetCtx.mounted) {
+                  setSheetState(() {
+                    pendingTransfers = fetched;
+                    selectedTransfer = pendingTransfers.isNotEmpty ? pendingTransfers.first : null;
+                    isLoadingTransfers = false;
+                  });
+                }
+              });
+            }
             Future<void> confirmReceipt(Map<String, dynamic> tr) async {
               setSheetState(() => isProcessing = true);
               final trId = tr['id']?.toString() ?? '';
@@ -535,7 +547,28 @@ class SalesmanReceiveStockModal {
                     const SizedBox(height: 16),
 
                     // Pending Dispatches Selector
-                    if (pendingTransfers.isNotEmpty) ...[
+                    if (isLoadingTransfers) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        alignment: Alignment.center,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: ClientColors.primary),
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Checking for manager dispatches...',
+                              style: TextStyle(fontSize: 12, color: ClientColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ] else if (pendingTransfers.isNotEmpty) ...[
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [

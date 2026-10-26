@@ -1,22 +1,29 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/colors.dart';
+import '../../../core/widgets/app_refresh_button.dart';
+import 'salesman_referral_modal.dart';
 
 class SalesmanReferTab extends StatelessWidget {
   final String salesmanName;
   final Map<String, dynamic> earningsData;
   final int soldToday;
   final List<Map<String, dynamic>> referralsList;
-  final TextEditingController refNameCtrl;
-  final TextEditingController refPhoneCtrl;
-  final String selectedKycFile;
+  final TextEditingController? refNameCtrl;
+  final TextEditingController? refPhoneCtrl;
+  final String? selectedKycFile;
   final String? selectedKycBase64;
   final Uint8List? selectedKycBytes;
-  final bool isSubmittingReferral;
-  final Function(String name, String? base64, Uint8List? bytes) onKycChanged;
-  final Future<void> Function() onSubmitReferral;
+  final bool? isSubmittingReferral;
+  final Function(String name, String? base64, Uint8List? bytes)? onKycChanged;
+  final Future<void> Function()? onSubmitReferral;
+  final Future<bool> Function({
+    required String name,
+    required String phone,
+    String? email,
+    String? docType,
+    String? kycDoc,
+  })? onDirectReferralSubmit;
   final VoidCallback onRefreshReferrals;
   final Future<void> Function()? onRefresh;
 
@@ -26,14 +33,15 @@ class SalesmanReferTab extends StatelessWidget {
     required this.earningsData,
     required this.soldToday,
     required this.referralsList,
-    required this.refNameCtrl,
-    required this.refPhoneCtrl,
-    required this.selectedKycFile,
-    required this.selectedKycBase64,
-    required this.selectedKycBytes,
-    required this.isSubmittingReferral,
-    required this.onKycChanged,
-    required this.onSubmitReferral,
+    this.refNameCtrl,
+    this.refPhoneCtrl,
+    this.selectedKycFile,
+    this.selectedKycBase64,
+    this.selectedKycBytes,
+    this.isSubmittingReferral,
+    this.onKycChanged,
+    this.onSubmitReferral,
+    this.onDirectReferralSubmit,
     required this.onRefreshReferrals,
     this.onRefresh,
   });
@@ -354,285 +362,30 @@ class SalesmanReferTab extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // Refer a Salesman Form Card
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: ClientColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.person_add, color: ClientColors.primary, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'Refer a New Salesman',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: ClientColors.textDark,
-                      ),
-                    ),
-                  ],
+          // Refer a New Salesman CTA Button
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: () => _openReferralModal(context),
+              icon: const Icon(Icons.person_add_alt_1, size: 20),
+              label: const Text(
+                'Refer a New Salesman',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  letterSpacing: 0.3,
                 ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: refNameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ClientColors.primary,
+                foregroundColor: Colors.white,
+                elevation: 2,
+                shadowColor: ClientColors.primary.withValues(alpha: 0.3),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: refPhoneCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone Number',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  ),
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 12),
-
-                // KYC Upload Box
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: selectedKycFile != 'Tap to select file'
-                        ? Colors.blue.withValues(alpha: 0.05)
-                        : ClientColors.creamBg,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selectedKycFile != 'Tap to select file'
-                          ? Colors.blue.shade300
-                          : ClientColors.border,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                selectedKycFile != 'Tap to select file'
-                                    ? Icons.check_circle
-                                    : Icons.cloud_upload_outlined,
-                                color: selectedKycFile != 'Tap to select file'
-                                    ? Colors.green
-                                    : ClientColors.primary,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Upload KYC (Aadhaar / Govt ID)',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: ClientColors.textDark,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (selectedKycFile != 'Tap to select file')
-                            GestureDetector(
-                              onTap: () => onKycChanged('Tap to select file', null, null),
-                              child: const Text(
-                                'Remove',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.red,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      if (selectedKycBytes != null) ...[
-                        const SizedBox(height: 10),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.memory(
-                            selectedKycBytes!,
-                            height: 110,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      InkWell(
-                        onTap: () {
-                          showModalBottomSheet(
-                            context: context,
-                            shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                            ),
-                            builder: (sheetCtx) => SafeArea(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Padding(
-                                      padding: EdgeInsets.only(bottom: 8),
-                                      child: Text(
-                                        'Attach KYC Document (Aadhaar/PAN)',
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                      ),
-                                    ),
-                                    ListTile(
-                                      leading: const CircleAvatar(
-                                        backgroundColor: Colors.blue,
-                                        child: Icon(Icons.camera_alt, color: Colors.white),
-                                      ),
-                                      title: const Text('Take Photo with Camera'),
-                                      subtitle: const Text('Capture clear photo of physical ID proof'),
-                                      onTap: () async {
-                                        Navigator.pop(sheetCtx);
-                                        try {
-                                          final picker = ImagePicker();
-                                          final picked = await picker.pickImage(
-                                            source: ImageSource.camera,
-                                            imageQuality: 85,
-                                            maxWidth: 1600,
-                                          );
-                                          if (picked != null) {
-                                            final bytes = await picked.readAsBytes();
-                                            final base64Str =
-                                                'data:image/jpeg;base64,${base64Encode(bytes)}';
-                                            onKycChanged(picked.name, base64Str, bytes);
-                                            if (context.mounted) {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Attached: ${picked.name}'),
-                                                  backgroundColor: Colors.green,
-                                                ),
-                                              );
-                                            }
-                                          }
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                    ListTile(
-                                      leading: const CircleAvatar(
-                                        backgroundColor: Colors.orange,
-                                        child: Icon(Icons.photo_library, color: Colors.white),
-                                      ),
-                                      title: const Text('Choose from Gallery / Photos'),
-                                      subtitle: const Text('Select image or document scan'),
-                                      onTap: () async {
-                                        Navigator.pop(sheetCtx);
-                                        try {
-                                          final picker = ImagePicker();
-                                          final picked = await picker.pickImage(
-                                            source: ImageSource.gallery,
-                                            imageQuality: 85,
-                                            maxWidth: 1600,
-                                          );
-                                          if (picked != null) {
-                                            final bytes = await picked.readAsBytes();
-                                            final base64Str =
-                                                'data:image/jpeg;base64,${base64Encode(bytes)}';
-                                            onKycChanged(picked.name, base64Str, bytes);
-                                            if (context.mounted) {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Attached: ${picked.name}'),
-                                                  backgroundColor: Colors.green,
-                                                ),
-                                              );
-                                            }
-                                          }
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: ClientColors.border),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                selectedKycFile != 'Tap to select file'
-                                    ? Icons.check_circle
-                                    : Icons.upload_file,
-                                size: 16,
-                                color: selectedKycFile != 'Tap to select file'
-                                    ? Colors.green
-                                    : ClientColors.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  selectedKycFile,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: selectedKycFile != 'Tap to select file'
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: selectedKycFile != 'Tap to select file'
-                                        ? Colors.black87
-                                        : ClientColors.textMuted,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              Text(
-                                selectedKycFile != 'Tap to select file' ? 'Change' : 'Attach',
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: ClientColors.primary,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                ElevatedButton(
-                  onPressed: isSubmittingReferral ? null : onSubmitReferral,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: ClientColors.primary,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(46),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: isSubmittingReferral
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                      : const Text(
-                          'Submit Referral ->',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                ),
-              ],
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -649,10 +402,20 @@ class SalesmanReferTab extends StatelessWidget {
                   color: ClientColors.textDark,
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 18, color: ClientColors.primary),
-                tooltip: 'Refresh',
-                onPressed: onRefreshReferrals,
+              AppRefreshButton(
+                icon: Icons.refresh,
+                size: 18,
+                color: ClientColors.primary,
+                tooltip: 'Refresh Referrals',
+                showFeedback: true,
+                feedbackMessage: 'Referral team updated',
+                onRefresh: () async {
+                  if (onRefresh != null) {
+                    await onRefresh!();
+                  } else {
+                    onRefreshReferrals();
+                  }
+                },
               ),
             ],
           ),
@@ -763,6 +526,40 @@ class SalesmanReferTab extends StatelessWidget {
       color: ClientColors.primary,
       onRefresh: onRefresh ?? () async => onRefreshReferrals(),
       child: scrollContent,
+    );
+  }
+
+  void _openReferralModal(BuildContext context) {
+    SalesmanReferralModal.show(
+      context: context,
+      onSubmit: ({
+        required String name,
+        required String phone,
+        String? email,
+        String? docType,
+        String? kycDoc,
+      }) async {
+        if (onDirectReferralSubmit != null) {
+          return await onDirectReferralSubmit!(
+            name: name,
+            phone: phone,
+            email: email,
+            docType: docType,
+            kycDoc: kycDoc,
+          );
+        } else {
+          refNameCtrl?.text = name;
+          refPhoneCtrl?.text = phone;
+          if (kycDoc != null && onKycChanged != null) {
+            onKycChanged!('Attached Document', kycDoc, null);
+          }
+          if (onSubmitReferral != null) {
+            await onSubmitReferral!();
+            return true;
+          }
+          return false;
+        }
+      },
     );
   }
 }

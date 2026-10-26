@@ -102,6 +102,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   int _totalDispatchedBottles = 0;
   int _currentStock = 0;
   int _soldToday = 0;
+  int _unsettledSoldToday = 0;
+  double _unsettledCashToday = 0.0;
+  double _unsettledOnlineToday = 0.0;
+  bool _hasUserModifiedSettlement = false;
+  bool _isGeneratingSettlementQr = false;
   double? _bottleUnitPrice;
   double get _unitPrice => _bottleUnitPrice ?? 0.0;
   late TextEditingController _cashHandoverCtrl;
@@ -109,6 +114,32 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   late TextEditingController _soldBottlesInputCtrl;
   late TextEditingController _damagedBottlesInputCtrl;
   List<Map<String, dynamic>> _settlementHistory = [];
+
+  void _prefillSettlementDefaults({bool force = false}) {
+    if (_hasUserModifiedSettlement && !force) return;
+
+    final int heldStock = _currentStock > 0 ? _currentStock : _totalDispatchedBottles;
+    final int prefillQty = heldStock > 0 ? _unsettledSoldToday.clamp(0, heldStock) : _unsettledSoldToday;
+
+    _settlementSoldBottles = prefillQty;
+    _soldBottlesInputCtrl.text = '$prefillQty';
+
+    final int calculatedRev = (prefillQty * _unitPrice).toInt();
+    if (_unsettledCashToday > 0 || _unsettledOnlineToday > 0) {
+      _cashHandoverCtrl.text = '${_unsettledCashToday.toInt()}';
+      _onlinePaymentCtrl.text = '${_unsettledOnlineToday.toInt()}';
+    } else if (calculatedRev > 0) {
+      _cashHandoverCtrl.text = '$calculatedRev';
+      _onlinePaymentCtrl.text = '0';
+    } else {
+      _cashHandoverCtrl.text = '0';
+      _onlinePaymentCtrl.text = '0';
+    }
+
+    if (force) {
+      _hasUserModifiedSettlement = false;
+    }
+  }
 
   // Damaged Products State
   bool _hasDamagedBottles = false;
@@ -123,6 +154,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
   Uint8List? _proofPhotoBytes;
   String? _proofPhotoBase64;
   bool _isStockAccepted = false;
+  bool _isOpeningReceiveScanner = false;
   List<Map<String, dynamic>> _stockHistory = [];
 
   // Refer Tab State
@@ -145,11 +177,15 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     _soldBottlesInputCtrl = TextEditingController(text: '$_settlementSoldBottles');
     _damagedBottlesInputCtrl = TextEditingController(text: '$_damagedBottles');
     _damageNotesCtrl = TextEditingController();
+    AppState.onGlobalRefresh = () => _loadAllData(silent: true);
     _loadAllData();
   }
 
   @override
   void dispose() {
+    if (AppState.onGlobalRefresh != null) {
+      AppState.onGlobalRefresh = null;
+    }
     _cashHandoverCtrl.dispose();
     _onlinePaymentCtrl.dispose();
     _soldBottlesInputCtrl.dispose();
@@ -197,13 +233,12 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     if (!_hasInitialLoaded && !silent) {
       setState(() => _isLoading = true);
     }
+    await _loadSettlements();
     await Future.wait([
       _loadEarnings(),
-      _loadSettlements(),
       _loadReferrals(),
       _loadCustomers(),
       _loadStockTransfers(),
-      _loadCurrentStock(),
       _loadProductPricing(),
       _restoreOfflineSalesState(),
     ]);
@@ -223,8 +258,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       final res = await http.get(Uri.parse('${AppState.apiBaseUrl}/stock/$_salesmanId'));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        final stockList = data['stock'];
-        if (stockList is List && stockList.isNotEmpty) {
+        final stockList = data is List ? data : (data is Map ? data['stock'] : null);
+        if (stockList is List) {
           int totalStock = 0;
           for (var item in stockList) {
             totalStock += (item['available_quantity'] as num?)?.toInt() ??
@@ -234,9 +269,10 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           if (mounted) {
             setState(() {
               _currentStock = totalStock;
-              if (_totalDispatchedBottles == 0) {
+              if (_settlementHistory.isEmpty && _totalDispatchedBottles == 0) {
                 _totalDispatchedBottles = totalStock;
               }
+              _prefillSettlementDefaults();
             });
           }
         }
@@ -260,8 +296,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
               if (prodId != null && prodId.isNotEmpty) _productId = prodId;
               if (basePrice != null && basePrice > 0) {
                 _bottleUnitPrice = basePrice;
-                _cashHandoverCtrl.text = '${(_settlementSoldBottles * _unitPrice).toInt()}';
               }
+              _prefillSettlementDefaults();
             });
           }
         }
@@ -367,14 +403,31 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final todayData = data['today'];
-        if (todayData != null && todayData['unit_price'] != null) {
-          final p = (todayData['unit_price'] as num).toDouble();
-          if (p > 0) {
-            _bottleUnitPrice = p;
+        if (todayData != null) {
+          if (todayData['unit_price'] != null) {
+            final p = (todayData['unit_price'] as num).toDouble();
+            if (p > 0) {
+              _bottleUnitPrice = p;
+            }
+          }
+          if (todayData['bottles_sold_today'] != null) {
+            _unsettledSoldToday = (todayData['bottles_sold_today'] as num).toInt();
+          }
+          if (todayData['cash_collected_today'] != null) {
+            _unsettledCashToday = (todayData['cash_collected_today'] as num).toDouble();
+          }
+          if (todayData['online_collected_today'] != null) {
+            _unsettledOnlineToday = (todayData['online_collected_today'] as num).toDouble();
+          }
+          if (todayData['bottles_dispatched'] != null) {
+            final activeDisp = (todayData['bottles_dispatched'] as num).toInt();
+            _totalDispatchedBottles = activeDisp;
+            _currentStock = activeDisp;
           }
         }
         setState(() {
           _settlementHistory = List<Map<String, dynamic>>.from(data['history'] ?? []);
+          _prefillSettlementDefaults(force: true);
         });
       } else if (res.statusCode == 429) {
         _handleRateLimit(res);
@@ -430,16 +483,8 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         final list = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         final completed = list.where((t) => t['status'] == 'completed').toList();
         if (completed.isNotEmpty) {
-          final total = completed.fold<int>(
-              0, (sum, t) => sum + ((t['quantity'] as num?)?.toInt() ?? 0));
           if (mounted) {
             setState(() {
-              if (total > 0) {
-                _totalDispatchedBottles = total;
-                if (_currentStock == 0) {
-                  _currentStock = total;
-                }
-              }
               _isStockAccepted = true;
               _stockHistory = completed
                   .map((t) => {
@@ -484,12 +529,24 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     } catch (_) {}
   }
 
-  Future<void> _submitReferral() async {
-    if (_refNameCtrl.text.trim().isEmpty || _refPhoneCtrl.text.trim().isEmpty) {
+  Future<bool> _submitReferral({
+    String? name,
+    String? phone,
+    String? email,
+    String? docType,
+    String? kycDoc,
+  }) async {
+    final finalName = (name ?? _refNameCtrl.text).trim();
+    final finalPhone = (phone ?? _refPhoneCtrl.text).trim();
+    final finalEmail = (email ?? '').trim();
+    final finalDocType = docType ?? 'Aadhaar Card';
+    final finalKycDoc = kycDoc ?? (_selectedKycBase64 ?? _selectedKycFile);
+
+    if (finalName.isEmpty || finalPhone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter full name and phone number')),
       );
-      return;
+      return false;
     }
     setState(() => _isSubmittingReferral = true);
     try {
@@ -498,9 +555,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'referrer_id': _salesmanId,
-          'full_name': _refNameCtrl.text.trim(),
-          'phone': _refPhoneCtrl.text.trim(),
-          'kyc_doc': _selectedKycBase64 ?? _selectedKycFile,
+          'full_name': finalName,
+          'phone': finalPhone,
+          if (finalEmail.isNotEmpty) 'email': finalEmail,
+          'doc_type': finalDocType,
+          'kyc_doc': finalKycDoc,
         }),
       );
       if (res.statusCode == 201) {
@@ -521,15 +580,19 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
             ),
           );
         }
+        return true;
       } else if (res.statusCode == 429) {
         _handleRateLimit(res);
-        return;
+        return false;
       }
     } catch (_) {
       setState(() {
         _referralsList.insert(0, {
           'id': 'ref_${DateTime.now().millisecondsSinceEpoch}',
-          'full_name': _refNameCtrl.text.trim(),
+          'full_name': finalName,
+          'phone': finalPhone,
+          'email': finalEmail,
+          'doc_type': finalDocType,
           'status': 'Active',
           'earned': 0,
         });
@@ -547,9 +610,11 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
           ),
         );
       }
+      return true;
     } finally {
       if (mounted) setState(() => _isSubmittingReferral = false);
     }
+    return false;
   }
 
   Future<void> _pickDamageImage(ImageSource source) async {
@@ -598,143 +663,162 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
     );
   }
 
-  void _openReceiveStockScannerSheet() {
-    SalesmanReceiveStockModal.show(
-      context: context,
-      salesmanId: _salesmanId,
-      bottleUnitPrice: _bottleUnitPrice,
-      unitPrice: _unitPrice,
-      onStockReceived: (qty, prodName, amount) {
-        setState(() {
-          _currentStock += qty;
-          _totalDispatchedBottles += qty;
-          _isStockAccepted = true;
-          _stockHistory.insert(0, {
-            'date': 'Today, Just Now',
-            'bottles': qty,
-            'amount': amount,
-            'status': 'SETTLED',
+  Future<void> _openReceiveStockScannerSheet() async {
+    if (_isOpeningReceiveScanner) return;
+    setState(() => _isOpeningReceiveScanner = true);
+    try {
+      await SalesmanReceiveStockModal.show(
+        context: context,
+        salesmanId: _salesmanId,
+        bottleUnitPrice: _bottleUnitPrice,
+        unitPrice: _unitPrice,
+        onStockReceived: (qty, prodName, amount) {
+          setState(() {
+            _currentStock += qty;
+            _totalDispatchedBottles += qty;
+            _isStockAccepted = true;
+            _stockHistory.insert(0, {
+              'date': 'Today, Just Now',
+              'bottles': qty,
+              'amount': amount,
+              'status': 'SETTLED',
+            });
           });
-        });
-      },
-      onReloadData: () => _loadAllData(silent: true),
-    );
+        },
+        onReloadData: () => _loadAllData(silent: true),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isOpeningReceiveScanner = false);
+      }
+    }
   }
 
   Future<void> _initiateSettlementAndShowQR() async {
-    final int heldStock = _currentStock > 0 ? _currentStock : _totalDispatchedBottles;
-    final int damaged = _hasDamagedBottles ? _damagedBottles : 0;
-    final int sold = _settlementSoldBottles;
-    final int remaining = (heldStock - sold - damaged).clamp(0, heldStock);
-    final int soldAmt = (sold * _unitPrice).toInt();
-    final int cash = double.tryParse(_cashHandoverCtrl.text.trim())?.toInt() ?? 0;
-    final int online = double.tryParse(_onlinePaymentCtrl.text.trim())?.toInt() ?? 0;
-
-    String settlementId = 'stl_${DateTime.now().millisecondsSinceEpoch}';
-    final securityPin = (settlementId.hashCode.abs() % 900000 + 100000).toString();
-    final fsmId = AppState.currentUser?['parent_id']?.toString() ?? '';
-    final fsmName = AppState.currentUser?['parent_name'] ?? 'Field Sales Manager';
+    if (_isGeneratingSettlementQr) return;
+    setState(() => _isGeneratingSettlementQr = true);
 
     try {
-      final res = await http.post(
-        Uri.parse('${AppState.apiBaseUrl}/settlements'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'salesman_id': _salesmanId,
-          'salesman_name': _salesmanName,
-          'fsm_id': fsmId,
-          'fsm_name': fsmName,
-          'bottles_dispatched': heldStock,
-          'bottles_sold': sold,
-          'remaining_qty': remaining,
-          'damaged_qty': damaged,
-          'damage_notes': _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
-          'damage_image_base64': _damageImageBase64,
-          'unit_price': _unitPrice,
-          'cash_received': cash,
-          'online_payment': online,
-          'security_pin': securityPin,
-          'status': 'pending_fsm',
-        }),
-      );
+      final int heldStock = _currentStock > 0 ? _currentStock : _totalDispatchedBottles;
+      final int damaged = _hasDamagedBottles ? _damagedBottles : 0;
+      final int sold = _settlementSoldBottles;
+      final int remaining = (heldStock - sold - damaged).clamp(0, heldStock);
+      final int soldAmt = (sold * _unitPrice).toInt();
+      final int cash = double.tryParse(_cashHandoverCtrl.text.trim())?.toInt() ?? 0;
+      final int online = double.tryParse(_onlinePaymentCtrl.text.trim())?.toInt() ?? 0;
 
-      if (res.statusCode == 200 || res.statusCode == 201) {
-        final body = jsonDecode(res.body);
-        if (body['id'] != null) {
-          settlementId = body['id'].toString();
-        }
-      } else if (res.statusCode == 429) {
-        _handleRateLimit(res);
-      }
-    } catch (_) {}
+      String settlementId = 'stl_${DateTime.now().millisecondsSinceEpoch}';
+      final securityPin = (settlementId.hashCode.abs() % 900000 + 100000).toString();
+      final fsmId = AppState.currentUser?['parent_id']?.toString() ?? '';
+      final fsmName = AppState.currentUser?['parent_name'] ?? 'Field Sales Manager';
 
-    final qrPayload = jsonEncode({
-      'type': 'SALESMAN_TO_FSM_SETTLEMENT',
-      'settlement_id': settlementId,
-      'salesman_id': _salesmanId,
-      'salesman_name': _salesmanName,
-      'fsm_id': fsmId,
-      'fsm_name': fsmName,
-      'bottles_dispatched': heldStock,
-      'bottles_sold': sold,
-      'remaining_qty': remaining,
-      'damaged_qty': damaged,
-      'damage_notes': _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
-      'cash_received': cash,
-      'online_payment': online,
-      'total_amount': soldAmt,
-      'security_pin': securityPin,
-      'created_at': DateTime.now().toIso8601String(),
-    });
-
-    if (!mounted) return;
-
-    SalesmanSettlementQrModal.show(
-      context: context,
-      settlementId: settlementId,
-      fsmName: fsmName,
-      heldStock: heldStock,
-      sold: sold,
-      remaining: remaining,
-      damaged: damaged,
-      damageNotes: _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
-      damageBytes: _damageImageBytes,
-      cash: cash,
-      online: online,
-      soldAmt: soldAmt,
-      securityPin: securityPin,
-      qrPayload: qrPayload,
-      onSettled: () {
-        setState(() {
-          _currentStock = remaining;
-          _totalDispatchedBottles = remaining;
-          _settlementSoldBottles = 0;
-          _soldBottlesInputCtrl.text = '0';
-          _damagedBottles = 0;
-          _damagedBottlesInputCtrl.text = '0';
-          _hasDamagedBottles = false;
-          _damageImageFile = null;
-          _damageImageBytes = null;
-          _damageImageBase64 = null;
-          _cashHandoverCtrl.text = '0';
-          _onlinePaymentCtrl.text = '0';
-          _settlementHistory.insert(0, {
-            'id': settlementId,
-            'date_label': 'Today, Just Now',
+      try {
+        final res = await http.post(
+          Uri.parse('${AppState.apiBaseUrl}/settlements'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'salesman_id': _salesmanId,
+            'salesman_name': _salesmanName,
+            'fsm_id': fsmId,
+            'fsm_name': fsmName,
             'bottles_dispatched': heldStock,
             'bottles_sold': sold,
             'remaining_qty': remaining,
             'damaged_qty': damaged,
-            'total_value': soldAmt,
-            'cash_collected': cash,
+            'damage_notes': _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
+            'damage_image_base64': _damageImageBase64,
+            'unit_price': _unitPrice,
+            'cash_received': cash,
             'online_payment': online,
-            'status': 'SETTLED',
+            'security_pin': securityPin,
+            'status': 'pending_fsm',
+          }),
+        );
+
+        if (res.statusCode == 200 || res.statusCode == 201) {
+          final body = jsonDecode(res.body);
+          if (body['id'] != null) {
+            settlementId = body['id'].toString();
+          }
+        } else if (res.statusCode == 429) {
+          _handleRateLimit(res);
+        }
+      } catch (_) {}
+
+      final qrPayload = jsonEncode({
+        'type': 'SALESMAN_TO_FSM_SETTLEMENT',
+        'settlement_id': settlementId,
+        'salesman_id': _salesmanId,
+        'salesman_name': _salesmanName,
+        'fsm_id': fsmId,
+        'fsm_name': fsmName,
+        'bottles_dispatched': heldStock,
+        'bottles_sold': sold,
+        'remaining_qty': remaining,
+        'damaged_qty': damaged,
+        'damage_notes': _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
+        'cash_received': cash,
+        'online_payment': online,
+        'total_amount': soldAmt,
+        'security_pin': securityPin,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      if (!mounted) return;
+
+      setState(() => _isGeneratingSettlementQr = false);
+
+      SalesmanSettlementQrModal.show(
+        context: context,
+        settlementId: settlementId,
+        fsmName: fsmName,
+        heldStock: heldStock,
+        sold: sold,
+        remaining: remaining,
+        damaged: damaged,
+        damageNotes: _hasDamagedBottles ? _damageNotesCtrl.text.trim() : '',
+        damageBytes: _damageImageBytes,
+        cash: cash,
+        online: online,
+        soldAmt: soldAmt,
+        securityPin: securityPin,
+        qrPayload: qrPayload,
+        onSettled: () {
+          setState(() {
+            _currentStock = remaining;
+            _totalDispatchedBottles = remaining;
+            _settlementSoldBottles = 0;
+            _soldBottlesInputCtrl.text = '0';
+            _damagedBottles = 0;
+            _damagedBottlesInputCtrl.text = '0';
+            _hasDamagedBottles = false;
+            _damageImageFile = null;
+            _damageImageBytes = null;
+            _damageImageBase64 = null;
+            _cashHandoverCtrl.text = '0';
+            _onlinePaymentCtrl.text = '0';
+            _settlementHistory.insert(0, {
+              'id': settlementId,
+              'date_label': 'Today, Just Now',
+              'bottles_dispatched': heldStock,
+              'bottles_sold': sold,
+              'remaining_qty': remaining,
+              'damaged_qty': damaged,
+              'total_value': soldAmt,
+              'cash_collected': cash,
+              'online_payment': online,
+              'status': 'SETTLED',
+            });
           });
-        });
-        _loadAllData(silent: true);
-      },
-      onClose: () => _loadAllData(silent: true),
-    );
+          _loadAllData(silent: true);
+        },
+        onClose: () => _loadAllData(silent: true),
+      );
+    } finally {
+      if (mounted && _isGeneratingSettlementQr) {
+        setState(() => _isGeneratingSettlementQr = false);
+      }
+    }
   }
 
   @override
@@ -790,6 +874,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             proofPhotoBase64: _proofPhotoBase64,
                             stockHistory: _stockHistory,
                             onOpenReceiveStockScanner: _openReceiveStockScannerSheet,
+                            isOpeningScanner: _isOpeningReceiveScanner,
                             onProofPhotoChanged: (name, base64, bytes) {
                               setState(() {
                                 _proofPhotoName = name;
@@ -848,6 +933,26 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                               await _submitReferral();
                               _loadEarnings();
                             },
+                            onDirectReferralSubmit: ({
+                              required String name,
+                              required String phone,
+                              String? email,
+                              String? docType,
+                              String? kycDoc,
+                            }) async {
+                              final ok = await _submitReferral(
+                                name: name,
+                                phone: phone,
+                                email: email,
+                                docType: docType,
+                                kycDoc: kycDoc,
+                              );
+                              if (ok) {
+                                _loadReferrals();
+                                _loadEarnings();
+                              }
+                              return ok;
+                            },
                             onRefreshReferrals: () {
                               _loadReferrals();
                               _loadEarnings();
@@ -863,6 +968,9 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             settlementSoldBottles: _settlementSoldBottles,
                             bottleUnitPrice: _bottleUnitPrice,
                             unitPrice: _unitPrice,
+                            soldToday: _unsettledSoldToday,
+                            recordedCashToday: _unsettledCashToday,
+                            recordedOnlineToday: _unsettledOnlineToday,
                             cashHandoverCtrl: _cashHandoverCtrl,
                             onlinePaymentCtrl: _onlinePaymentCtrl,
                             soldBottlesInputCtrl: _soldBottlesInputCtrl,
@@ -883,12 +991,22 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
                             },
                             onUpdateSettlementState: ({soldBottles, hasDamaged, damagedCount}) {
                               setState(() {
+                                _hasUserModifiedSettlement = true;
                                 if (soldBottles != null) _settlementSoldBottles = soldBottles;
                                 if (hasDamaged != null) _hasDamagedBottles = hasDamaged;
                                 if (damagedCount != null) _damagedBottles = damagedCount;
                               });
                             },
+                            onUserModified: () {
+                              _hasUserModifiedSettlement = true;
+                            },
+                            onResetToRecorded: () {
+                              setState(() {
+                                _prefillSettlementDefaults(force: true);
+                              });
+                            },
                             onInitiateSettlement: _initiateSettlementAndShowQR,
+                            isGeneratingQr: _isGeneratingSettlementQr,
                             onRefresh: () => _loadAllData(silent: true),
                           ),
                         ],
@@ -947,42 +1065,7 @@ class _SalesmanDashboardState extends State<SalesmanDashboard> {
               ),
             ],
           ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.refresh, color: ClientColors.textMuted, size: 22),
-                tooltip: 'Refresh data',
-                onPressed: () => _loadAllData(silent: true),
-              ),
-              Stack(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined,
-                        color: ClientColors.textDark, size: 22),
-                    onPressed: () {},
-                  ),
-                  Positioned(
-                    right: 12,
-                    top: 12,
-                    child: Container(
-                      width: 7,
-                      height: 7,
-                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 4),
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: ClientColors.primary,
-                child: Text(
-                  _salesmanName.isNotEmpty ? _salesmanName[0].toUpperCase() : 'S',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
+          const SizedBox.shrink(),
         ],
       ),
     );

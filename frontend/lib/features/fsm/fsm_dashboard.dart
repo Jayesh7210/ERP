@@ -83,12 +83,6 @@ class _FsmDashboardState extends State<FsmDashboard> {
   String? _productId;
   String? _productName;
 
-  String get _initials {
-    final parts = _fsmName.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts[0].isEmpty) return 'FM';
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-  }
 
   // 1. Dashboard State
   Map<String, dynamic> _dashboardData = {
@@ -129,7 +123,16 @@ class _FsmDashboardState extends State<FsmDashboard> {
   @override
   void initState() {
     super.initState();
+    AppState.onGlobalRefresh = () => _loadAllFsmData(silent: true);
     _loadAllFsmData();
+  }
+
+  @override
+  void dispose() {
+    if (AppState.onGlobalRefresh != null) {
+      AppState.onGlobalRefresh = null;
+    }
+    super.dispose();
   }
 
   bool _isSyncingOffline = false;
@@ -620,40 +623,7 @@ class _FsmDashboardState extends State<FsmDashboard> {
           ),
         ],
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.refresh, color: ClientColors.textMuted, size: 22),
-          onPressed: () => _loadAllFsmData(silent: true),
-        ),
-        Container(
-          margin: const EdgeInsets.only(right: 14),
-          child: Stack(
-            children: [
-              CircleAvatar(
-                radius: 17,
-                backgroundColor: ClientColors.primary.withValues(alpha: 0.12),
-                child: Text(
-                  _initials,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ClientColors.primary),
-                ),
-              ),
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: ClientColors.success,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+      actions: const [],
     );
   }
 

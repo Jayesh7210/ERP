@@ -8,6 +8,7 @@ import '../../core/state/app_state.dart';
 import '../../core/services/offline_sync_service.dart';
 import 'modules/inventory_intake_tab.dart';
 import 'modules/fsm_distribution_tab.dart';
+import 'modules/store_settlement_tab.dart';
 import 'modules/direct_retail_sale_tab.dart';
 import 'modules/distributor_sale_tab.dart';
 import 'modules/store_reports_tab.dart';
@@ -21,7 +22,7 @@ class StoreAdminDashboard extends StatefulWidget {
 }
 
 class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
-  int _activeTab = 0; // 0: Inventory & Intake, 1: FSM Distribution, 2: Retail Sales, 3: Distributor Sales, 4: Reports & History
+  int _activeTab = 0; // 0: Inventory & Intake, 1: FSM Distribution, 2: Settlement Hub, 3: Retail Sales, 4: Distributor Sales, 5: Reports & History
   final List<int> _tabHistory = [0];
   DateTime? _lastBackPressTime;
   bool _isLoading = false;
@@ -95,7 +96,16 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
   @override
   void initState() {
     super.initState();
+    AppState.onGlobalRefresh = () => _loadAllStoreData();
     _loadAllStoreData();
+  }
+
+  @override
+  void dispose() {
+    if (AppState.onGlobalRefresh != null) {
+      AppState.onGlobalRefresh = null;
+    }
+    super.dispose();
   }
 
   bool _isSyncingOffline = false;
@@ -507,12 +517,13 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           unselectedItemColor: AppColors.textSecondary,
           backgroundColor: Colors.white,
           type: BottomNavigationBarType.fixed,
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-          unselectedLabelStyle: const TextStyle(fontSize: 11),
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+          unselectedLabelStyle: const TextStyle(fontSize: 10),
           onTap: (index) => _changeTab(index),
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.warehouse), label: 'Inventory'),
             BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'FSM Transfer'),
+            BottomNavigationBarItem(icon: Icon(Icons.handshake), label: 'Settlement'),
             BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Retail Sale'),
             BottomNavigationBarItem(icon: Icon(Icons.storefront), label: 'Distributor'),
             BottomNavigationBarItem(icon: Icon(Icons.query_stats), label: 'Reports'),
@@ -524,7 +535,7 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
 
   Widget _buildBody() {
     return IndexedStack(
-      index: _activeTab.clamp(0, 4),
+      index: _activeTab.clamp(0, 5),
       children: [
         InventoryIntakeTab(
           warehouseId: _warehouseId,
@@ -546,6 +557,11 @@ class _StoreAdminDashboardState extends State<StoreAdminDashboard> {
           transfers: _transfers,
           getStockForProduct: _getStockForProduct,
           onTransferComplete: _loadAllStoreData,
+        ),
+        StoreSettlementTab(
+          warehouseId: _warehouseId,
+          warehouseName: _warehouseName,
+          onSettlementCompleted: _loadAllStoreData,
         ),
         DirectRetailSaleView(
           warehouseId: _warehouseId,

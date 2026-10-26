@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../core/constants/colors.dart';
 import '../../core/services/session_service.dart';
 import '../../core/state/app_state.dart';
+import '../../core/widgets/app_refresh_button.dart';
 import '../auth/login_page.dart';
 import '../super_admin/super_admin_dashboard.dart';
 import '../super_admin/workforce_requests_page.dart';
@@ -284,7 +285,23 @@ class _DashboardShellState extends State<DashboardShell> {
         ),
         backgroundColor: AppColors.primary,
         actions: [
-          // Notification Bell with unread badge counter
+          // 1. Reset / Refresh Data Button
+          AppRefreshButton(
+            color: Colors.white,
+            size: 22,
+            tooltip: 'Refresh data',
+            showFeedback: true,
+            feedbackMessage: 'Data refreshed successfully',
+            onRefresh: () async {
+              await AppState.triggerRefresh();
+              if (mounted) {
+                setState(() {
+                  _initNotifications();
+                });
+              }
+            },
+          ),
+          // 2. Notification Bell with unread badge counter
           Stack(
             alignment: Alignment.center,
             children: [
@@ -319,10 +336,30 @@ class _DashboardShellState extends State<DashboardShell> {
                 ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white),
-            tooltip: 'Settings',
-            onPressed: () => _showSettingsModal(context),
+          // 3. Profile Avatar Icon (tapping opens Profile & Settings)
+          Padding(
+            padding: const EdgeInsets.only(right: 14, left: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => _showSettingsModal(context),
+              child: Tooltip(
+                message: 'Profile & Settings',
+                child: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Colors.white.withValues(alpha: 0.22),
+                  child: Text(
+                    (AppState.currentUser?['name']?.toString().isNotEmpty ?? false)
+                        ? AppState.currentUser!['name'].toString().substring(0, 1).toUpperCase()
+                        : 'U',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
